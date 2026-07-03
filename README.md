@@ -24,7 +24,9 @@ in the player. One video is processed at a time.
 
 ## How it works
 
-1. `yt-dlp` downloads the video (capped at 720p).
+1. `yt-dlp` downloads the best rendition up to 1080p for the final cut,
+   plus a 720p proxy used for analysis when the source is larger — so
+   output quality doesn't slow down scanning.
 2. YuNet detects the largest face in the screenshot; SFace turns it into a
    128-d reference embedding.
 3. Frames are sampled every 0.5 s; every detected face is embedded and
@@ -40,10 +42,13 @@ in the player. One video is processed at a time.
    actually enters instead of on blind padding. Only 0.15 s / 0.35 s of
    padding is added around the verified boundaries; adjacent refined clips
    are re-merged if they touch, and clips shorter than 0.5 s are dropped.
-5. `ffmpeg` re-encodes each interval (frame-accurate cuts) and concatenates
-   them into `output.mp4`, served back to the page with range support.
+5. `ffmpeg` re-encodes each interval from the full-quality file
+   (frame-accurate cuts, near-transparent x264 crf 18 / preset medium) and
+   concatenates them into `output.mp4`, served back to the page with range
+   support.
 
 Tuning knobs are constants at the top of `pipeline.py`: match threshold,
-sample interval, refine step, padding, and group gap. Job artifacts live
-under `storage/jobs/<id>/`; the downloaded source video is deleted after
-processing.
+sample interval, refine step, padding, group gap, and output resolution cap
+(`MAX_OUTPUT_HEIGHT`, default 1080 — raise to 2160 for 4K at the cost of
+much slower stitching). Job artifacts live under `storage/jobs/<id>/`; the
+downloaded source and proxy videos are deleted after processing.

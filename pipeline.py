@@ -36,6 +36,11 @@ END_PAD = 0.35
 MIN_CLIP_SECONDS = 0.5
 # Frames are downscaled to this width for detection (speed)
 DETECT_WIDTH = 960
+# The final reel is cut from the best rendition up to this height; raise to
+# 2160 for 4K output at the cost of much slower stitching
+MAX_OUTPUT_HEIGHT = 1080
+# Scanning/refinement run on a proxy no taller than this
+PROXY_HEIGHT = 720
 
 
 class PipelineError(Exception):
@@ -50,14 +55,11 @@ def _run(cmd, **kwargs):
     return result
 
 
-def download_video(url, job_dir, progress):
-    """Download the YouTube video (<=720p mp4). Returns the file path."""
-    out_path = os.path.join(job_dir, "source.mp4")
-    progress("download", 2, "Downloading video from YouTube...")
+def _ydl(format_spec, out_path, url):
     cmd = [
         sys.executable, "-m", "yt_dlp",
         "--no-playlist",
-        "-f", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/b[height<=720]/b",
+        "-f", format_spec,
         "--merge-output-format", "mp4",
         "-o", out_path,
         url,
@@ -66,13 +68,46 @@ def download_video(url, job_dir, progress):
     try:
         _run(cmd)
     except PipelineError:
-        progress("download", 5, "Download failed, retrying once...")
         time.sleep(3)
         _run(cmd)
-    if not os.path.exists(out_path):
+
+
+def _video_height(path):
+    result = _run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                   "-show_entries", "stream=height", "-of", "csv=p=0", path])
+    try:
+        return int(result.stdout.strip().splitlines()[0])
+    except (ValueError, IndexError):
+        return 0
+
+
+def download_video(url, job_dir, progress):
+    """Download the video at output quality plus, when the source is larger
+    than the proxy size, a low-res proxy for analysis.
+    Returns (source_path, proxy_path); they are the same file for small videos."""
+    source = os.path.join(job_dir, "source.mp4")
+    progress("download", 2, "Downloading video from YouTube...")
+    _ydl(f"bv*[height<={MAX_OUTPUT_HEIGHT}]+ba/b[height<={MAX_OUTPUT_HEIGHT}]/b",
+         source, url)
+    if not os.path.exists(source):
         raise PipelineError("Download finished but no video file was produced.")
+
+    if _video_height(source) <= PROXY_HEIGHT:
+        progress("download", 25, "Video downloaded.")
+        return source, source
+
+    # Scanning decodes every frame; a video-only low-res proxy keeps that fast
+    proxy = os.path.join(job_dir, "proxy.mp4")
+    progress("download", 18, "Downloading low-res proxy for analysis...")
+    try:
+        _ydl(f"bv*[height<={PROXY_HEIGHT}][ext=mp4]/bv*[height<={PROXY_HEIGHT}]/b[height<={PROXY_HEIGHT}]",
+             proxy, url)
+    except PipelineError:
+        proxy = source  # analysis falls back to the full-res file
+    if not os.path.exists(proxy):
+        proxy = source
     progress("download", 25, "Video downloaded.")
-    return out_path
+    return source, proxy
 
 
 class FaceMatcher:
@@ -233,7 +268,7 @@ def cut_and_stitch(video_path, intervals, job_dir, progress):
             "ffmpeg", "-y",
             "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}",
             "-i", video_path,
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
             "-c:a", "aac", "-ac", "2", "-ar", "44100",
             "-video_track_timescale", "90000",
             seg,
@@ -265,10 +300,10 @@ def process_job(url, screenshot_path, job_dir, progress):
     progress("reference", 1, "Reading the face from your screenshot...")
     ref_feat = reference_embedding(matcher, screenshot_path)
 
-    video_path = download_video(url, job_dir, progress)
+    video_path, proxy_path = download_video(url, job_dir, progress)
 
     progress("scan", 30, "Scanning video for the person...")
-    timestamps, duration = scan_video(matcher, video_path, ref_feat, progress)
+    timestamps, duration = scan_video(matcher, proxy_path, ref_feat, progress)
     if not timestamps:
         raise PipelineError(
             "The person was not found anywhere in the video. "
@@ -283,7 +318,7 @@ def process_job(url, screenshot_path, job_dir, progress):
             "more frontal screenshot of their face."
         )
     progress("refine", 70, "Refining clip boundaries...")
-    intervals = refine_intervals(matcher, video_path, ref_feat, groups, duration, progress)
+    intervals = refine_intervals(matcher, proxy_path, ref_feat, groups, duration, progress)
     if not intervals:
         raise PipelineError(
             "Only fleeting, sub-second matches were found — not enough for a clip. "
@@ -292,6 +327,8 @@ def process_job(url, screenshot_path, job_dir, progress):
     progress("stitch", 80, f"Found {len(intervals)} clip(s). Cutting and stitching...")
     output = cut_and_stitch(video_path, intervals, job_dir, progress)
 
+    if proxy_path != video_path:
+        os.remove(proxy_path)
     os.remove(video_path)
     return {
         "output": output,
