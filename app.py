@@ -13,7 +13,7 @@ import pipeline
 BASE_DIR = os.path.dirname(__file__)
 JOBS_DIR = os.path.join(BASE_DIR, "storage", "jobs")
 
-app = FastAPI(title="Person Clip Stitcher")
+app = FastAPI(title="FaceReel")
 
 jobs = {}
 jobs_lock = threading.Lock()
@@ -72,7 +72,7 @@ def get_output(job_id: str):
     if not job or job["status"] != "done":
         raise HTTPException(404, "Output not available.")
     return FileResponse(job["output_path"], media_type="video/mp4",
-                        filename="person_clips.mp4", content_disposition_type="inline")
+                        filename="facereel.mp4", content_disposition_type="inline")
 
 
 @app.get("/")

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ffmpeg -version)",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//opt/homebrew/opt/**)",
+      "Bash(/opt/homebrew/bin/python3.14 -m venv .venv)",
+      "Bash(.venv/bin/pip install *)"
+    ]
+  }
+}

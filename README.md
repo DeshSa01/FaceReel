@@ -1,4 +1,4 @@
-# Person Clip Stitcher
+# FaceReel
 
 Web app that takes a YouTube URL plus a screenshot of a person from that video,
 finds every moment the person appears, and stitches those clips into one
