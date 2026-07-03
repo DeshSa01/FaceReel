@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Person Clip Stitcher</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1a2130; --muted: #64748b;
+    --accent: #4f46e5; --accent-2: #6366f1; --border: #e2e8f0; --error: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1420; --card: #1a2130; --text: #e8ecf4; --muted: #94a3b8;
+      --accent: #818cf8; --accent-2: #6366f1; --border: #2d3748; --error: #f87171;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+    display: flex; justify-content: center; padding: 40px 16px;
+  }
+  main { width: 100%; max-width: 640px; }
+  h1 { font-size: 1.5rem; margin-bottom: 4px; }
+  .sub { color: var(--muted); margin-bottom: 24px; font-size: 0.95rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; margin-bottom: 20px;
+  }
+  label { display: block; font-weight: 600; font-size: 0.9rem; margin: 16px 0 6px; }
+  label:first-child { margin-top: 0; }
+  input[type="url"] {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--border);
+    border-radius: 8px; background: var(--bg); color: var(--text); font-size: 0.95rem;
+  }
+  input[type="url"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .drop {
+    border: 2px dashed var(--border); border-radius: 8px; padding: 20px;
+    text-align: center; color: var(--muted); cursor: pointer; font-size: 0.9rem;
+  }
+  .drop.has-file { border-color: var(--accent); color: var(--text); }
+  .drop img { max-height: 120px; max-width: 100%; border-radius: 6px; margin-top: 10px; }
+  button {
+    margin-top: 20px; width: 100%; padding: 12px; border: none; border-radius: 8px;
+    background: var(--accent); color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: var(--accent-2); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .hidden { display: none; }
+  .bar-track {
+    height: 10px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 5px; overflow: hidden; margin: 12px 0 8px;
+  }
+  .bar-fill {
+    height: 100%; width: 0%; border-radius: 5px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    transition: width 0.6s ease;
+  }
+  .status-msg { color: var(--muted); font-size: 0.9rem; }
+  .error { color: var(--error); font-size: 0.9rem; margin-top: 12px; }
+  video { width: 100%; border-radius: 8px; background: #000; margin-top: 8px; }
+  .stats { color: var(--muted); font-size: 0.85rem; margin-top: 10px; }
+  a.dl { color: var(--accent); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Person Clip Stitcher</h1>
+  <p class="sub">Paste a YouTube link and a screenshot of a person — get one video of every moment they appear.</p>
+
+  <div class="card">
+    <form id="form">
+      <label for="url">YouTube video URL</label>
+      <input type="url" id="url" required placeholder="https://www.youtube.com/watch?v=...">
+
+      <label>Screenshot of the person</label>
+      <div class="drop" id="drop">
+        <span id="drop-text">Click to choose an image (a clear shot of their face)</span>
+        <img id="preview" class="hidden" alt="">
+        <input type="file" id="file" accept="image/*" hidden>
+      </div>
+
+      <button type="submit" id="go">Find &amp; stitch clips</button>
+      <p class="error hidden" id="form-error"></p>
+    </form>
+  </div>
+
+  <div class="card hidden" id="progress-card">
+    <strong id="stage-label">Working...</strong>
+    <div class="bar-track"><div class="bar-fill" id="bar"></div></div>
+    <p class="status-msg" id="status-msg"></p>
+  </div>
+
+  <div class="card hidden" id="result-card">
+    <strong>Your stitched video</strong>
+    <video id="player" controls playsinline></video>
+    <p class="stats" id="stats"></p>
+    <a class="dl" id="download" download="person_clips.mp4">Download video</a>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const stageNames = {
+  start: "Starting", reference: "Reading screenshot", download: "Downloading video",
+  scan: "Scanning for the person", refine: "Refining clip boundaries",
+  stitch: "Cutting & stitching", done: "Done",
+};
+let pollTimer = null;
+
+$("drop").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", () => {
+  const f = $("file").files[0];
+  if (!f) return;
+  $("drop").classList.add("has-file");
+  $("drop-text").textContent = f.name;
+  $("preview").src = URL.createObjectURL(f);
+  $("preview").classList.remove("hidden");
+});
+
+$("form").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("form-error").classList.add("hidden");
+  const f = $("file").files[0];
+  if (!f) { showFormError("Please choose a screenshot image."); return; }
+
+  const body = new FormData();
+  body.append("url", $("url").value);
+  body.append("screenshot", f);
+
+  $("go").disabled = true;
+  $("result-card").classList.add("hidden");
+  try {
+    const res = await fetch("/api/jobs", { method: "POST", body });
+    if (!res.ok) throw new Error((await res.json()).detail || "Failed to start job.");
+    const { id } = await res.json();
+    $("progress-card").classList.remove("hidden");
+    poll(id);
+  } catch (err) {
+    showFormError(err.message);
+    $("go").disabled = false;
+  }
+});
+
+function showFormError(msg) {
+  $("form-error").textContent = msg;
+  $("form-error").classList.remove("hidden");
+}
+
+function poll(id) {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    let job;
+    try {
+      const res = await fetch(`/api/jobs/${id}`);
+      if (!res.ok) throw new Error("Lost contact with the job.");
+      job = await res.json();
+    } catch (err) {
+      finish(); showFormError(err.message); return;
+    }
+    $("stage-label").textContent = stageNames[job.stage] || "Working";
+    $("bar").style.width = job.progress + "%";
+    $("status-msg").textContent = job.message;
+
+    if (job.status === "done") {
+      finish();
+      $("progress-card").classList.add("hidden");
+      $("result-card").classList.remove("hidden");
+      $("player").src = `/api/jobs/${id}/output`;
+      $("download").href = `/api/jobs/${id}/output`;
+      const r = job.result || {};
+      $("stats").textContent =
+        `${r.clip_count} clip(s) · ${r.output_duration}s of footage from a ${r.source_duration}s video`;
+    } else if (job.status === "error") {
+      finish();
+      $("progress-card").classList.add("hidden");
+      showFormError(job.message);
+    }
+  }, 1000);
+}
+
+function finish() {
+  clearInterval(pollTimer);
+  $("go").disabled = false;
+}
+</script>
+</body>
+</html>
