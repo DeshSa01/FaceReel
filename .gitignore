@@ -8,3 +8,4 @@ storage/jobs/
 *.mp4
 *.jpg
 *.png
+.claude/
