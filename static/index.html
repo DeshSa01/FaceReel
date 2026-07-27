@@ -57,6 +57,38 @@
     background: linear-gradient(90deg, var(--accent), var(--accent-2));
     transition: width 0.6s ease;
   }
+  .toggle-row {
+    display: flex; gap: 10px; align-items: flex-start; margin-top: 20px;
+    border-top: 1px solid var(--border); padding-top: 16px;
+  }
+  .toggle-row.no-rule { border-top: none; padding-top: 0; margin-top: 12px; }
+  .toggle-row.rec-row { margin-top: 14px; }
+  .toggle-row input { margin-top: 3px; accent-color: var(--accent); flex: none; }
+  .toggle-row label { margin: 0; cursor: pointer; }
+  .outcome {
+    margin-top: 12px; padding: 9px 11px; border-radius: 7px; background: var(--bg);
+    border: 1px solid var(--border); color: var(--muted); font-size: 0.8rem;
+    line-height: 1.45;
+  }
+  details.tuning { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 14px; }
+  details.tuning summary {
+    cursor: pointer; font-weight: 600; font-size: 0.9rem; color: var(--muted);
+  }
+  details.tuning summary:hover { color: var(--text); }
+  .knob { margin-top: 16px; }
+  .knob-head { display: flex; justify-content: space-between; align-items: baseline; }
+  .knob-head label { margin: 0; }
+  .knob-val {
+    font-variant-numeric: tabular-nums; font-size: 0.85rem; font-weight: 600;
+    color: var(--accent);
+  }
+  .knob-hint { color: var(--muted); font-size: 0.8rem; margin-top: 2px; line-height: 1.4; }
+  input[type="range"] { width: 100%; margin-top: 8px; accent-color: var(--accent); }
+  .reset {
+    margin-top: 16px; width: auto; padding: 6px 12px; font-size: 0.8rem;
+    background: transparent; color: var(--muted); border: 1px solid var(--border);
+  }
+  .reset:hover:not(:disabled) { background: var(--bg); color: var(--text); }
   .status-msg { color: var(--muted); font-size: 0.9rem; }
   .error { color: var(--error); font-size: 0.9rem; margin-top: 12px; }
   video { width: 100%; border-radius: 8px; background: #000; margin-top: 8px; }
@@ -80,6 +112,74 @@
         <img id="preview" class="hidden" alt="">
         <input type="file" id="file" accept="image/*" hidden>
       </div>
+
+      <div class="toggle-row">
+        <input type="checkbox" id="zoom">
+        <div>
+          <label for="zoom">Zoom in on the subject</label>
+          <p class="knob-hint">When the person fills little of the frame, reframe
+            around them instead of showing the whole shot.</p>
+        </div>
+      </div>
+
+      <div class="toggle-row no-rule">
+        <input type="checkbox" id="hi_res">
+        <div>
+          <label for="hi_res">Download the source in 4K</label>
+          <p class="knob-hint">Best rendition up to 2160p instead of 1080p. Much
+            slower to download and stitch.</p>
+        </div>
+      </div>
+
+      <p class="outcome" id="outcome"></p>
+
+      <details class="tuning" open>
+        <summary>Clip start fine-tuning</summary>
+
+        <div class="toggle-row no-rule rec-row">
+          <input type="checkbox" id="recommended">
+          <div>
+            <label for="recommended">Use recommended</label>
+            <p class="knob-hint">0.15 / 0.6 / 0.6 — measured to keep 100% of the
+              genuine footage, against 79.8% at 0 / 0 / 0. Moving any slider
+              clears this.</p>
+          </div>
+        </div>
+
+        <div class="knob">
+          <div class="knob-head">
+            <label for="lead_in">Lead-in</label>
+            <span class="knob-val" id="lead_in-val"></span>
+          </div>
+          <input type="range" id="lead_in" min="-0.5" max="1" step="0.05" value="0">
+          <p class="knob-hint">Footage kept before the person is first recognised.
+            Negative cuts into them for a hard entry.</p>
+        </div>
+
+        <div class="knob">
+          <div class="knob-head">
+            <label for="boundary_reach">Boundary reach</label>
+            <span class="knob-val" id="boundary_reach-val"></span>
+          </div>
+          <input type="range" id="boundary_reach" min="0" max="3" step="0.1" value="0">
+          <p class="knob-hint">How far a clip edge may walk outward hunting for the
+            true entry. Off at 0, so clips begin on a verified frame and can start
+            up to 0.5s late. Raise to ~0.6 to recover those late starts.</p>
+        </div>
+
+        <div class="knob">
+          <div class="knob-head">
+            <label for="clip_gap">Clip gap</label>
+            <span class="knob-val" id="clip_gap-val"></span>
+          </div>
+          <input type="range" id="clip_gap" min="0" max="3" step="0.1" value="0">
+          <p class="knob-hint">Longest unverified stretch allowed inside one clip.
+            At 0 every detection must stand on its own, so weak edge frames are
+            dropped. Raise to ~0.6 to keep them and get longer clips.</p>
+        </div>
+
+        <button type="button" class="reset" id="reset-tuning">Reset to defaults</button>
+      </details>
 
       <button type="submit" id="go">Find &amp; stitch clips</button>
       <p class="error hidden" id="form-error"></p>
@@ -105,9 +205,53 @@ const $ = id => document.getElementById(id);
 const stageNames = {
   start: "Starting", reference: "Reading screenshot", download: "Downloading video",
   scan: "Scanning for the person", refine: "Refining clip boundaries",
-  stitch: "Cutting & stitching", done: "Done",
+  track: "Measuring framing", stitch: "Cutting & stitching", done: "Done",
 };
 let pollTimer = null;
+
+// slider id -> default, mirroring pipeline.Tuning
+const knobs = { lead_in: 0, boundary_reach: 0, clip_gap: 0 };
+// full recall at minimum excess; reach/gap past 0.6 add junk without adding footage
+const recommended = { lead_in: 0.15, boundary_reach: 0.6, clip_gap: 0.6 };
+
+function showKnob(id) {
+  $(`${id}-val`).textContent = (+$(id).value).toFixed(2) + "s";
+}
+// the checkbox reflects the sliders rather than driving them, so dragging a
+// slider back onto the recommended values re-ticks it and any edit clears it
+function syncRecommended() {
+  $("recommended").checked = Object.entries(recommended)
+    .every(([id, v]) => Math.abs(+$(id).value - v) < 1e-9);
+}
+function setKnobs(values) {
+  for (const [id, v] of Object.entries(values)) {
+    $(id).value = v;
+    showKnob(id);
+  }
+  syncRecommended();
+}
+
+for (const id of Object.keys(knobs)) {
+  $(id).addEventListener("input", () => { showKnob(id); syncRecommended(); });
+}
+$("recommended").addEventListener("change", () =>
+  setKnobs($("recommended").checked ? recommended : knobs));
+$("reset-tuning").addEventListener("click", () => setKnobs(knobs));
+setKnobs(knobs);
+
+// the two toggles interact, so spell out what the combination actually does
+const outcomes = {
+  "true,true":   "4K source → 1080p reel. A 2× crop is native pixels, so reframed clips stay sharp. Slowest option.",
+  "true,false":  "1080p source → 1080p reel. Zoom is a real upscale, so reframed clips will look soft.",
+  "false,true":  "4K source → 4K reel. Sharpest and by far the largest files; no reframing.",
+  "false,false": "1080p source → 1080p reel. The default.",
+};
+function showOutcome() {
+  $("outcome").textContent = outcomes[`${$("zoom").checked},${$("hi_res").checked}`];
+}
+$("zoom").addEventListener("change", showOutcome);
+$("hi_res").addEventListener("change", showOutcome);
+showOutcome();
 
 $("drop").addEventListener("click", () => $("file").click());
 $("file").addEventListener("change", () => {
@@ -128,6 +272,9 @@ $("form").addEventListener("submit", async e => {
   const body = new FormData();
   body.append("url", $("url").value);
   body.append("screenshot", f);
+  for (const id of Object.keys(knobs)) body.append(id, $(id).value);
+  body.append("zoom", $("zoom").checked);
+  body.append("hi_res", $("hi_res").checked);
 
   $("go").disabled = true;
   $("result-card").classList.add("hidden");
@@ -167,11 +314,16 @@ function poll(id) {
       finish();
       $("progress-card").classList.add("hidden");
       $("result-card").classList.remove("hidden");
+      const r = job.result || {}, t = job.tuning || {};
       $("player").src = `/api/jobs/${id}/output`;
       $("download").href = `/api/jobs/${id}/output`;
-      const r = job.result || {};
+      // this attribute wins over the server's Content-Disposition for
+      // same-origin links, so it has to carry the real name
+      $("download").download = r.filename || "facereel.mp4";
       $("stats").textContent =
-        `${r.clip_count} clip(s) · ${r.output_duration}s of footage from a ${r.source_duration}s video`;
+        `${r.clip_count} clip(s) · ${r.output_duration}s of footage from a ${r.source_duration}s video` +
+        ` · ${r.resolution}` + (t.zoom ? ` · ${r.zoomed_clips} zoomed` : "") +
+        ` · lead-in ${t.lead_in}s, reach ${t.boundary_reach}s, gap ${t.clip_gap}s`;
     } else if (job.status === "error") {
       finish();
       $("progress-card").classList.add("hidden");
