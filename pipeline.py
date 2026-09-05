@@ -205,32 +205,74 @@ def _video_height(path):
         return 0
 
 
+def _decodable(path):
+    """True when OpenCV can actually pull a frame out of the file.
+
+    OpenCV bundles its own FFmpeg, and in the Linux wheels its AV1 decoder is
+    hardware-only -- on a machine without AV1 hardware the file opens and then
+    every read fails ("Failed to get pixel format"). yt-dlp now serves AV1 by
+    default, so this has to be probed rather than assumed. The macOS wheel
+    decodes AV1 in software, which is why this only ever bites in the
+    container."""
+    cap = cv2.VideoCapture(path)
+    try:
+        return bool(cap.isOpened() and cap.read()[0])
+    finally:
+        cap.release()
+
+
+def _transcode_for_analysis(path, job_dir, progress):
+    """Re-encode to H.264 so the scan can read it, using the system ffmpeg --
+    it carries the software AV1/VP9 decoders that OpenCV's build lacks. Only
+    reached when no H.264 rendition was available at all."""
+    out = os.path.join(job_dir, "analysis.mp4")
+    progress("download", 22, "Converting video to a readable format...")
+    _run(["ffmpeg", "-y", "-i", path, "-an",
+          # never upscale; the scan gains nothing from more pixels
+          "-vf", f"scale=-2:'min({PROXY_HEIGHT},ih)'",
+          "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", out])
+    return out
+
+
 def download_video(url, job_dir, progress, max_height=MAX_OUTPUT_HEIGHT):
-    """Download the video at output quality plus, when the source is larger
-    than the proxy size, a low-res proxy for analysis.
+    """Download the video at output quality plus, when the source is too large
+    or cannot be decoded for analysis, a low-res H.264 proxy.
     Returns (source_path, proxy_path); they are the same file for small videos."""
     source = os.path.join(job_dir, "source.mp4")
     progress("download", 2, "Downloading video from YouTube...")
-    # yt-dlp takes the best rendition at or below the cap, so asking for 4K on
-    # a 1080p-only video simply yields 1080p
+    # Codec deliberately unconstrained here: YouTube only publishes H.264 up to
+    # 1080p, so demanding it would silently cap the 4K toggle at 1080p. Only
+    # the system ffmpeg ever decodes this file, and it handles AV1 and VP9.
     _ydl(f"bv*[height<={max_height}]+ba/b[height<={max_height}]/b", source, url)
     if not os.path.exists(source):
         raise PipelineError("Download finished but no video file was produced.")
 
-    if _video_height(source) <= PROXY_HEIGHT:
+    if _video_height(source) <= PROXY_HEIGHT and _decodable(source):
         progress("download", 25, "Video downloaded.")
         return source, source
 
-    # Scanning decodes every frame; a video-only low-res proxy keeps that fast
+    # Scanning decodes every frame, so a video-only low-res proxy keeps it
+    # fast. Unlike the source this asks for avc1 explicitly -- OpenCV reads
+    # this one, and it cannot handle the AV1 yt-dlp would otherwise pick.
     proxy = os.path.join(job_dir, "proxy.mp4")
     progress("download", 18, "Downloading low-res proxy for analysis...")
     try:
-        _ydl(f"bv*[height<={PROXY_HEIGHT}][ext=mp4]/bv*[height<={PROXY_HEIGHT}]/b[height<={PROXY_HEIGHT}]",
+        _ydl(f"bv*[height<={PROXY_HEIGHT}][vcodec^=avc1]"
+             f"/b[height<={PROXY_HEIGHT}][vcodec^=avc1]"
+             f"/bv*[height<={PROXY_HEIGHT}][ext=mp4]"
+             f"/bv*[height<={PROXY_HEIGHT}]/b[height<={PROXY_HEIGHT}]",
              proxy, url)
     except PipelineError:
         proxy = source  # analysis falls back to the full-res file
     if not os.path.exists(proxy):
         proxy = source
+
+    if not _decodable(proxy):
+        converted = _transcode_for_analysis(proxy, job_dir, progress)
+        if proxy != source:
+            os.remove(proxy)  # the unreadable download is now dead weight
+        proxy = converted
+
     progress("download", 25, "Video downloaded.")
     return source, proxy
 
