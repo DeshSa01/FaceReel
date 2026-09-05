@@ -1,8 +1,20 @@
-# Deployment file for the nucbox. Copy this next to a storage/ directory owned
-# by uid 1000, then `docker compose up -d`.
+# Deployment stack for the nucbox. Written to paste straight into Portainer's
+# stack editor; also works with a plain `docker compose up -d`.
 #
-# Pin to a specific build by swapping :latest for a :sha-<short> tag when a
-# release misbehaves.
+# BEFORE deploying, create the storage directory on the host and give it to
+# uid 1000 (the container's user):
+#
+#     sudo mkdir -p /opt/facereel/storage
+#     sudo chown -R 1000:1000 /opt/facereel/storage
+#
+# This has to happen first. If the path does not exist, Docker creates it
+# owned by root and the container cannot write it -- the log then shows a
+# PermissionError instead of "Cleared N orphaned job folder(s)".
+#
+# Override STORAGE_PATH or TZ under Portainer's "Environment variables"
+# section if the defaults below don't suit.
+#
+# Pin to a :sha-<short> tag instead of :latest to roll back a bad build.
 services:
   facereel:
     image: ghcr.io/deshsa01/facereel:latest
@@ -11,8 +23,9 @@ services:
     ports:
       - "8765:8765"
     volumes:
-      # the container runs as uid 1000; `sudo chown -R 1000:1000 storage`
-      - ./storage:/app/storage
+      # absolute, not ./storage -- a relative path in a Portainer stack is
+      # resolved on the Portainer container's filesystem, not the host's
+      - ${STORAGE_PATH:-/opt/facereel/storage}:/app/storage
     environment:
       # reels are named with time.strftime(), i.e. container-local time
       TZ: ${TZ:-UTC}

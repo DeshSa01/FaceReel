@@ -158,6 +158,12 @@ def _ydl(format_spec, out_path, url):
     cmd = [
         sys.executable, "-m", "yt_dlp",
         "--no-playlist",
+        # YouTube signs media URLs behind a JS player challenge. Solving it
+        # needs both a JS runtime on PATH (deno) and yt-dlp's EJS solver
+        # scripts, which are not bundled and are fetched once into the yt-dlp
+        # cache. Without this flag the challenge fails and every download ends
+        # in a hard 403 -- not the transient kind the retry below covers.
+        "--remote-components", "ejs:github",
         "-f", format_spec,
         "--merge-output-format", "mp4",
         "-o", out_path,

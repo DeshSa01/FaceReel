@@ -17,38 +17,49 @@ in the player. One video is processed at a time.
 ## Run with Docker
 
 Every push to `main` builds a `linux/amd64` image and pushes it to
-`ghcr.io/deshsa01/facereel:latest` (`.github/workflows/docker.yml`). On the
-host, one-time setup:
+`ghcr.io/deshsa01/facereel:latest` (`.github/workflows/docker.yml`). The
+package is public, so the host pulls it without logging in.
+
+**First, on the host**, create the storage directory and give it to uid 1000 —
+the user the container runs as:
 
 ```bash
-mkdir -p ~/facereel/storage
-sudo chown -R 1000:1000 ~/facereel/storage   # the container runs as uid 1000
-cp docker-compose.yml ~/facereel/
-cd ~/facereel && docker compose up -d
+sudo mkdir -p /opt/facereel/storage
+sudo chown -R 1000:1000 /opt/facereel/storage
 ```
 
-Then open `http://<host>:8765`. To take a new build:
+Do this *before* deploying. If the path doesn't exist, Docker creates it owned
+by root and the container can't write it.
+
+**Deploying with Portainer** (how the nucbox runs it): Stacks -> Add stack ->
+paste `docker-compose.yml` into the web editor -> Deploy. Override
+`STORAGE_PATH` or `TZ` under "Environment variables" if the defaults don't
+suit. Take a new build with the stack's **Pull and redeploy**.
+
+**Or without Portainer:**
 
 ```bash
-docker compose pull && docker compose up -d
+docker compose up -d
+docker compose pull && docker compose up -d   # to take a new build
 ```
+
+Either way, open `http://<host>:8765`.
 
 Notes:
 
 - **Run exactly one instance, one worker.** Job state lives in a module-level
   dict in `app.py` and the one-at-a-time rule is enforced in-process, so
   scaling out or adding `--workers` would break both.
-- `./storage` is bind-mounted, so job scratch is visible on the host — but it
-  is still wiped on every startup, same as a local run.
-- Set `TZ` in the compose environment if you want reel filenames stamped in
-  local time; the container defaults to UTC.
+- The storage path is bind-mounted, so job scratch is visible on the host —
+  but it is still wiped on every startup, same as a local run. A healthy start
+  logs `Cleared N orphaned job folder(s)`; a `PermissionError` there means the
+  `chown` above was skipped.
+- The bind mount uses an **absolute** path. A relative one (`./storage`) in a
+  Portainer stack resolves against the Portainer container's filesystem rather
+  than the host's.
 - Encoding is software libx264 (crf 18 / preset medium), unchanged from local.
   On a low-power host this is the slow part of a job.
 - Pin `image:` to a `sha-<short>` tag instead of `latest` to roll back.
-
-The first workflow run creates the GHCR package as **private** even though the
-repo is public — flip it to public in the package settings, or `docker login
-ghcr.io` on the host with a PAT that has `read:packages`.
 
 ### Bumping yt-dlp
 
@@ -61,11 +72,20 @@ version there, push, and the rebuild is seconds rather than a full reinstall.
 Running locally:
 
 - `ffmpeg` on PATH (installed via Homebrew)
+- **`deno` on PATH** (`brew install deno`). YouTube signs media URLs behind a
+  JS player challenge; without a JS runtime every download fails with a hard
+  403. deno is the only runtime yt-dlp enables by default. The pipeline also
+  passes `--remote-components ejs:github` so yt-dlp fetches the solver scripts
+  it needs — a runtime is necessary but not sufficient on its own.
 - Python venv in `.venv` with the packages in `requirements.txt` (plus
   `requirements-ytdlp.txt`). The venv uses `opencv-python`; the image uses
   `opencv-python-headless`, which is the same `cv2` API without the GUI stack.
 - Face models in `models/` (YuNet detector + SFace recognizer, from the
   [OpenCV model zoo](https://github.com/opencv/opencv_zoo))
+
+yt-dlp goes stale quickly against YouTube — a version a couple of months old
+fails with a 403 even with deno present. Keep `.venv` in step with
+`requirements-ytdlp.txt`: `.venv/bin/pip install -U yt-dlp`.
 
 Running under Docker, only Docker itself — `ffmpeg`, the Python deps, and the
 models are all baked into the image.

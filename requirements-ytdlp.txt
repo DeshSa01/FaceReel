@@ -1,4 +1,4 @@
 # Kept apart from requirements.txt so it installs as the last pip layer of the
 # image. YouTube changes break yt-dlp regularly; bumping this one line rebuilds
 # in seconds instead of reinstalling opencv and numpy.
-yt-dlp==2026.6.9
+yt-dlp==2026.8.19

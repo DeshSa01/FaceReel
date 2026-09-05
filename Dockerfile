@@ -1,5 +1,11 @@
-# Single stage: every dependency ships as a prebuilt wheel, so there is nothing
-# to compile and a builder stage would save nothing.
+# yt-dlp's YouTube extractor needs a JavaScript runtime to solve the player
+# challenges; without one every download fails with a hard 403. deno is the
+# only runtime yt-dlp enables by default, so shipping it means pipeline.py
+# needs no --js-runtimes flag. Pinned to the version the Mac runs.
+FROM denoland/deno:bin-2.9.5 AS deno
+
+# Otherwise single stage: every Python dependency ships as a prebuilt wheel,
+# so there is nothing to compile and a builder stage would save nothing.
 FROM python:3.14-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -11,6 +17,10 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg \
  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=deno /deno /usr/local/bin/deno
+# fail the build here rather than at the first download attempt
+RUN deno --version
 
 WORKDIR /app
 
@@ -33,6 +43,9 @@ RUN useradd --uid 1000 --create-home app \
  && mkdir -p storage/jobs \
  && chown -R app:app storage
 USER app
+# Docker does not reliably derive HOME from the USER instruction, and deno
+# caches under $HOME/.cache -- left as /root it would be unwritable
+ENV HOME=/home/app
 
 EXPOSE 8765
 
