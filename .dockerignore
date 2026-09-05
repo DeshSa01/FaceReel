@@ -1,0 +1,20 @@
+# macOS arm64 binaries -- would poison a linux image and bloat the build context
+.venv/
+
+.git/
+.github/
+.claude/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.DS_Store
+
+# job scratch; the container makes its own and it is bind-mounted at runtime
+storage/
+
+HANDOFF.md
+README.md
+docker-compose.yml
+
+# models/ is NOT ignored -- the ONNX files are required at runtime

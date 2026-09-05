@@ -4,7 +4,7 @@ Web app that takes a YouTube URL plus a screenshot of a person from that video,
 finds every moment the person appears, and stitches those clips into one
 continuous playable video.
 
-## Run
+## Run locally
 
 ```bash
 .venv/bin/uvicorn app:app --host 127.0.0.1 --port 8765
@@ -14,13 +14,61 @@ Then open http://127.0.0.1:8765, paste a YouTube link, upload a clear
 screenshot of the person's face, and wait for the stitched video to appear
 in the player. One video is processed at a time.
 
+## Run with Docker
+
+Every push to `main` builds a `linux/amd64` image and pushes it to
+`ghcr.io/deshsa01/facereel:latest` (`.github/workflows/docker.yml`). On the
+host, one-time setup:
+
+```bash
+mkdir -p ~/facereel/storage
+sudo chown -R 1000:1000 ~/facereel/storage   # the container runs as uid 1000
+cp docker-compose.yml ~/facereel/
+cd ~/facereel && docker compose up -d
+```
+
+Then open `http://<host>:8765`. To take a new build:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Notes:
+
+- **Run exactly one instance, one worker.** Job state lives in a module-level
+  dict in `app.py` and the one-at-a-time rule is enforced in-process, so
+  scaling out or adding `--workers` would break both.
+- `./storage` is bind-mounted, so job scratch is visible on the host — but it
+  is still wiped on every startup, same as a local run.
+- Set `TZ` in the compose environment if you want reel filenames stamped in
+  local time; the container defaults to UTC.
+- Encoding is software libx264 (crf 18 / preset medium), unchanged from local.
+  On a low-power host this is the slow part of a job.
+- Pin `image:` to a `sha-<short>` tag instead of `latest` to roll back.
+
+The first workflow run creates the GHCR package as **private** even though the
+repo is public — flip it to public in the package settings, or `docker login
+ghcr.io` on the host with a PAT that has `read:packages`.
+
+### Bumping yt-dlp
+
+YouTube changes break yt-dlp periodically. It is pinned in its own file,
+`requirements-ytdlp.txt`, installed as the last layer of the image: edit the
+version there, push, and the rebuild is seconds rather than a full reinstall.
+
 ## Requirements
 
+Running locally:
+
 - `ffmpeg` on PATH (installed via Homebrew)
-- Python venv in `.venv` with: fastapi, uvicorn, opencv-python, numpy,
-  yt-dlp, python-multipart
+- Python venv in `.venv` with the packages in `requirements.txt` (plus
+  `requirements-ytdlp.txt`). The venv uses `opencv-python`; the image uses
+  `opencv-python-headless`, which is the same `cv2` API without the GUI stack.
 - Face models in `models/` (YuNet detector + SFace recognizer, from the
   [OpenCV model zoo](https://github.com/opencv/opencv_zoo))
+
+Running under Docker, only Docker itself — `ffmpeg`, the Python deps, and the
+models are all baked into the image.
 
 ## How it works
 

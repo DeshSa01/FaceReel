@@ -1,0 +1,22 @@
+# Deployment file for the nucbox. Copy this next to a storage/ directory owned
+# by uid 1000, then `docker compose up -d`.
+#
+# Pin to a specific build by swapping :latest for a :sha-<short> tag when a
+# release misbehaves.
+services:
+  facereel:
+    image: ghcr.io/deshsa01/facereel:latest
+    container_name: facereel
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      # the container runs as uid 1000; `sudo chown -R 1000:1000 storage`
+      - ./storage:/app/storage
+    environment:
+      # reels are named with time.strftime(), i.e. container-local time
+      TZ: ${TZ:-UTC}
+
+# Deliberately no replicas/scaling: job state lives in a module-level dict in
+# app.py and the one-video-at-a-time rule (HTTP 409) is enforced in-process.
+# A second instance would break both.
