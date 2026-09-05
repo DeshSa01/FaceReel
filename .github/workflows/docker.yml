@@ -48,4 +48,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # ignore-error: the GHA cache backend intermittently fails the
+          # export with "not_found" *after* the image has already been pushed,
+          # which would otherwise redden a build that actually succeeded
+          cache-to: type=gha,mode=max,ignore-error=true
