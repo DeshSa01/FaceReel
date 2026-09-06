@@ -6,6 +6,12 @@ how it works, why it works that way, and what's still open.
 Repo: https://github.com/DeshSa01/FaceReel (branch `main`, all work pushed)
 Local path: `/Users/sandesh/projects/video-stitcher` (directory name predates the rename)
 
+> **Starting a new session? Read §15 first.** The next piece of work is the reel
+> archive: fully specced, not yet built, with its tasks in
+> `specs/001-reel-archive/tasks.md`. §14 covers how the app is deployed and the
+> three environment gaps that bit during containerisation — worth reading before
+> changing anything that touches downloads or video decoding.
+
 ---
 
 ## 1. What it does
@@ -28,7 +34,12 @@ Form options: three clip-boundary sliders with a "Use recommended" preset
 | Face detect | OpenCV `FaceDetectorYN` (YuNet) | `models/yunet.onnx` |
 | Face recognize | OpenCV `FaceRecognizerSF` (SFace) | `models/sface.onnx`, 128-d embeddings |
 | Video | `ffmpeg` / `ffprobe` (Homebrew), `yt-dlp` | |
+| JS runtime | `deno` (Homebrew locally, pinned 2.9.5 in the image) | **Required** — YouTube 403s without it (§14) |
 | Frontend | Single static HTML file, vanilla JS | `static/index.html` |
+| Container | `python:3.14-slim` + ffmpeg + deno | `Dockerfile`; deps pinned as a full closure |
+| Registry | `ghcr.io/deshsa01/facereel` | Built by GitHub Actions on push to `main` |
+| Deployment | Portainer stack on an ACEMAGIC N95 (Proxmox) | `docker-compose.yml`; storage bind-mounted |
+| Planning | GitHub spec-kit | `.specify/`, `specs/`, constitution v1.0.0 |
 
 **Why YuNet/SFace and not InsightFace/dlib/face_recognition:** they ship inside
 OpenCV with no extra native deps, which avoids build pain on Python 3.14 / arm64.
@@ -47,6 +58,14 @@ Models came from the [OpenCV model zoo](https://github.com/opencv/opencv_zoo)
 - `static/index.html` — form, live progress bar, `<video>` player, download link.
   Light/dark themed.
 - `models/` — the two ONNX files.
+- `Dockerfile`, `.dockerignore`, `docker-compose.yml`,
+  `.github/workflows/docker.yml` — the container and its CI (§14).
+- `requirements.txt` — **full pinned closure**, transitive packages included.
+  `requirements-ytdlp.txt` is separate on purpose: it is the last image layer,
+  so bumping yt-dlp rebuilds in seconds (§14).
+- `.specify/` — spec-kit scripts, templates, and the project constitution.
+  `specs/<NNN>-<name>/` — per-feature spec / plan / tasks (§15).
+- `archive.py` — **does not exist yet**; the next feature creates it (§15).
 - `storage/jobs/<job_id>/` — per-job scratch: screenshot, source video, proxy,
   segments, `output.mp4`. Source + proxy are deleted on success; `output.mp4`
   stays for the life of the process (it's what gets served) but is **wiped at
@@ -450,3 +469,178 @@ creates the folder if it is missing.
 This is destructive by design: it makes disk state match the in-memory job dict,
 which is empty at startup. Anyone who wants a reel to survive must download it
 before restarting.
+
+---
+
+## 14. Containerisation & deployment (added 2026-09-05)
+
+The app now runs continuously as a container on a home server (ACEMAGIC Mini PC
+S1, Intel N95, under Proxmox, managed by Portainer). It is still the same
+single-worker app — nothing about the pipeline changed.
+
+**Delivery**: push to `main` → GitHub Actions builds `linux/amd64` → pushes
+`ghcr.io/deshsa01/facereel:latest` **and** a `sha-<short>` tag. The package is
+public, so the host pulls without logging in. Pin to a `sha-` tag in
+`docker-compose.yml` to roll back. Docs-only pushes skip the build
+(`paths-ignore`).
+
+**On the host**, before first deploy:
+
+```bash
+sudo mkdir -p /opt/facereel/storage
+sudo chown -R 1000:1000 /opt/facereel/storage   # container runs as uid 1000
+```
+
+Skipping the `chown` gives a `PermissionError` at startup instead of the
+`Cleared N orphaned job folder(s)` line. Portainer stacks need an **absolute**
+bind path — a relative one resolves inside the Portainer container, not on the
+host.
+
+### 14a. Three environment gaps that passed locally and failed in the container
+
+These cost a full debugging cycle each. They are the reason constitution
+Principle III exists.
+
+**1. No JS runtime → hard 403 on every download.** YouTube signs media URLs
+behind a JS player challenge. Bisected against a real video; all three are
+required and any two alone still 403:
+
+| yt-dlp | deno | `--remote-components ejs:github` | Result |
+|---|---|---|---|
+| 2026.6.9 | ✗ | ✗ | 403 |
+| 2026.6.9 | ✓ | ✓ | 403 — old build picks the `android vr` client, now blocked |
+| 2026.8.19 | ✓ | ✗ | challenge solving fails |
+| 2026.8.19 | ✓ | ✓ | **works** (uses `visionos`) |
+
+So: deno in the image, `--remote-components ejs:github` in `_ydl()`, and a
+current yt-dlp. The Mac worked all along only because Homebrew had deno.
+**The existing single retry in `_ydl()` does not help here** — that covers the
+*transient* 403, which is a different failure.
+
+**2. OpenCV cannot decode AV1 on Linux.** yt-dlp now serves AV1 by default.
+OpenCV bundles *its own* FFmpeg, and in the Linux wheels its AV1 decoder is
+hardware-only — the file opens and every read fails (`Failed to get pixel
+format`), so `scan_video` sees zero frames. Installing system codecs does not
+help; OpenCV does not use the system FFmpeg. The macOS wheel decodes AV1 in
+software, which is why it only appeared once containerised.
+
+Fix: the **proxy** (the file OpenCV scans) requests `[vcodec^=avc1]`. The
+**source** is deliberately left unconstrained — YouTube publishes H.264 only up
+to 1080p, so forcing avc1 there silently caps the 4K toggle (verified: the 2160
+selector returns a 1080p rendition). Only the system ffmpeg touches the source.
+`_decodable()` probes a real frame read because `isOpened()` returns True for a
+file that cannot be read; `_transcode_for_analysis()` is the fallback when no
+H.264 rendition exists at all.
+
+**3. GHA cache export flakes.** `cache-to: type=gha` intermittently fails with
+`not_found` *after* the image has already pushed, reddening a successful build.
+Now `ignore-error=true`. If a build shows red, check whether the manifest was
+pushed before assuming it failed.
+
+### 14b. Deliberate constraints
+
+- **One instance, one worker.** Job state is a module-level dict and the
+  one-at-a-time rule is in-process. No `--workers`, no replicas.
+- **`opencv-python-headless`** in the image (same `cv2` API, no GUI stack, so no
+  `libGL`). The dev venv still has plain `opencv-python`.
+- **`HOME=/home/app`** is set explicitly — Docker does not reliably derive it
+  from `USER`, and deno caches under `$HOME`.
+- **Encoding is still software libx264** (crf 18 / preset medium), unchanged.
+  The N95 has QuickSync and `h264_vaapi` would be much faster, but it changes
+  quality characteristics and needs a software fallback. **Deferred pending a
+  real timing measurement** — that measurement has not been taken yet.
+
+### 14c. Open question
+
+LXC vs Docker was raised. Answer: no meaningful CPU difference — both are
+namespaces + cgroups on the same kernel. The only reason to prefer an LXC is
+that `/dev/dri` passthrough is trivial from one and painful from a VM, which
+matters *only* if QuickSync encoding is pursued. Do not rewrite as a native LXC:
+it would cost the pinned image, CI and rollback, and Debian trixie ships Python
+3.13, not the 3.14 this is tested on.
+
+---
+
+## 15. Next up: the reel archive (specced 2026-09-05, NOT built)
+
+**Everything needed to start implementing is in `specs/001-reel-archive/`.**
+Read `spec.md` then `plan.md`, and work `tasks.md` in order.
+
+### The problem
+
+A finished reel lives in `storage/jobs/<id>/output.mp4` and the job record exists
+only in memory, so `clean_jobs_dir()` destroys every past reel at startup (§13).
+That was a fair trade for a hand-started local tool. It is data loss now that the
+app runs continuously and restarts on every redeploy.
+
+### The design in one paragraph
+
+A sibling `storage/archive/` that the startup wipe never touches, holding one
+self-contained directory per reel — `output.mp4`, `thumb.jpg`, the reference
+screenshot, and a `reel.json` sidecar. A new `archive.py` owns it; `app.py` gains
+list/media/delete endpoints and serves `static/archive.html`. `pipeline.py` is
+untouched.
+
+### Decisions already settled with the user — do not relitigate
+
+- **Retention is unlimited.** Nothing is ever auto-deleted. Total archive size is
+  displayed instead, as the agreed compensating control.
+- **Thumbnail grid**, using a poster frame from the reel (not the uploaded face
+  image) — a title alone does not say *which person* a reel is of.
+- **Stored per reel**: the stats `process_job()` already returns, the five tuning
+  values, the source URL, the reference screenshot, and a creation timestamp.
+- **Deletion is permanent.** No recycle bin, no undo; confirmation is the only
+  safeguard.
+- **No migration.** Existing reels in job directories are lost at the next
+  restart, exactly as they would be today.
+
+### Two things to get right, or the feature is worse than not having it
+
+1. **Validate the id before building any path.** `^[0-9a-f]{12}$`, in
+   `archive.py` so no endpoint can skip it. Every archive endpoint builds a
+   filesystem path from a URL segment and one of them calls `shutil.rmtree`.
+   `quickstart.md` step 5 tests traversal — **run it before trusting the delete
+   endpoint**.
+2. **Assemble entries in `.tmp-<id>/` and `os.rename` into place.** A rename is
+   atomic, so a half-written entry is never visible. Without it an interrupted
+   archive leaves an entry that lists but will not play — discovered only later,
+   when the reel is already unrecoverable. Write `reel.json` last.
+
+### Sequence
+
+`tasks.md` has 33 tasks in six phases. **US1 alone (T007–T013) is the MVP** — it
+ends the data loss with no UI at all, and is worth landing and verifying on its
+own. US2 (browse/play) then US3 (delete) follow, in that order because a
+destructive endpoint should not exist before there is a tested listing to confirm
+it acts on the right entry.
+
+Verification is `quickstart.md`. The step that actually matters is the
+**container redeploy test** (its step 6), not just a local restart — redeploy is
+what happens on every new image.
+
+### Working with spec-kit
+
+Installed at `.specify/`, with skills in `.claude/skills/` as `/speckit-*`
+(`-specify`, `-plan`, `-tasks`, `-implement`, `-clarify`, `-analyze`,
+`-checklist`, `-converge`). **A session must be started *after* installation for
+the skills to be invocable** — they were installed mid-session and could not be
+called in that session; the artifacts were produced by following each skill's
+documented steps by hand instead. A fresh session can just run
+`/speckit-implement`.
+
+`create-new-feature.sh` does **not** create or switch git branches in this
+version; it only makes `specs/NNN-name/`. `.specify/feature.json` is the
+machine-local pointer to the active feature and is gitignored by spec-kit.
+
+**Caveat**: `.gitignore` excludes `.claude/`, so the spec-kit skills are
+untracked and a fresh clone will not have them (re-run `specify init`, or change
+the ignore to `.claude/*` plus `!.claude/skills/` — git cannot re-include inside
+an excluded *directory*, so the current single-line pattern will not work).
+
+### Constitution
+
+`.specify/memory/constitution.md`, v1.0.0, ratified 2026-09-05. Five principles
+derived from conventions already in this repo, each citing its evidence. It
+deliberately does **not** mandate test-first: there is no test suite, and an
+unmet gate is just something to route around. Plans carry a Constitution Check;
+`specs/001-reel-archive/plan.md` passes all five.
