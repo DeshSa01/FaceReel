@@ -10,6 +10,7 @@ from dataclasses import asdict
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+import archive
 import pipeline
 
 BASE_DIR = os.path.dirname(__file__)
@@ -35,6 +36,7 @@ async def lifespan(_app):
     # anything, or a test run would wipe the user's outputs
     removed = clean_jobs_dir()
     print(f"Cleared {removed} orphaned job folder(s) from {JOBS_DIR}")
+    archive.ensure_archive_dir()
     yield
 
 
@@ -52,13 +54,28 @@ def _worker(job_id, url, screenshot_path, job_dir, tuning):
 
     try:
         result = pipeline.process_job(url, screenshot_path, job_dir, progress, tuning)
-        job.update(status="done", stage="done", progress=100,
-                   message="Done!", result={k: v for k, v in result.items() if k != "output"},
-                   output_path=result["output"])
     except pipeline.PipelineError as e:
         job.update(status="error", message=str(e))
+        return
     except Exception as e:
         job.update(status="error", message=f"Unexpected error: {e}")
+        return
+
+    try:
+        entry_path = archive.archive_job(job_id, url, result, tuning, screenshot_path)
+    except Exception as e:
+        # The reel generated correctly but did not persist -- report failure
+        # rather than success, since the atomic rename guarantees there is no
+        # half-saved reel to explain (research D8).
+        job.update(status="error", message=f"Reel was generated but could not be saved: {e}")
+        return
+
+    # Repoint at the archived file so /api/jobs/{id}/output keeps serving the
+    # result card unchanged (FR-027, research D4) -- the job dir it came from
+    # is wiped at the next restart.
+    job.update(status="done", stage="done", progress=100,
+               message="Done!", result={k: v for k, v in result.items() if k != "output"},
+               output_path=os.path.join(entry_path, "output.mp4"))
 
 
 @app.post("/api/jobs")
@@ -119,3 +136,71 @@ def index():
     # page and keep serving a stale copy across restarts; force revalidation
     return FileResponse(os.path.join(BASE_DIR, "static", "index.html"),
                         headers={"Cache-Control": "no-cache"})
+
+
+def _require_valid_id(reel_id):
+    # A malformed id is 400, never 404, so a traversal attempt is
+    # distinguishable in the logs from a genuine miss (research D5). The
+    # routes below capture reel_id with the :path converter specifically so
+    # that an encoded "/" still reaches this check instead of being 404'd by
+    # the router before validation ever runs.
+    if not archive.valid_id(reel_id):
+        raise HTTPException(400, "Malformed reel id.")
+
+
+@app.get("/archive")
+def archive_page():
+    return FileResponse(os.path.join(BASE_DIR, "static", "archive.html"),
+                        headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/archive")
+def list_archive():
+    total_bytes, entries = archive.list_entries()
+    return {"total_bytes": total_bytes, "entries": entries}
+
+
+@app.get("/api/archive/{reel_id:path}/video")
+def get_archive_video(reel_id: str):
+    _require_valid_id(reel_id)
+    entry = archive.read_entry(reel_id)
+    if entry is None:
+        raise HTTPException(404, "Archived reel not found.")
+    path = os.path.join(archive.entry_dir(reel_id), entry["video"])
+    if not os.path.exists(path):
+        raise HTTPException(404, "Archived reel not found.")
+    return FileResponse(path, media_type="video/mp4",
+                        filename=entry["filename"], content_disposition_type="inline")
+
+
+@app.get("/api/archive/{reel_id:path}/thumb")
+def get_archive_thumb(reel_id: str):
+    _require_valid_id(reel_id)
+    entry = archive.read_entry(reel_id)
+    if entry is None or not entry.get("thumb"):
+        raise HTTPException(404, "No thumbnail for this reel.")
+    path = os.path.join(archive.entry_dir(reel_id), entry["thumb"])
+    if not os.path.exists(path):
+        raise HTTPException(404, "No thumbnail for this reel.")
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@app.get("/api/archive/{reel_id:path}/screenshot")
+def get_archive_screenshot(reel_id: str):
+    _require_valid_id(reel_id)
+    entry = archive.read_entry(reel_id)
+    if entry is None or not entry.get("screenshot"):
+        raise HTTPException(404, "No screenshot for this reel.")
+    path = os.path.join(archive.entry_dir(reel_id), entry["screenshot"])
+    if not os.path.exists(path):
+        raise HTTPException(404, "No screenshot for this reel.")
+    return FileResponse(path)
+
+
+@app.delete("/api/archive/{reel_id:path}")
+def delete_archive_entry(reel_id: str):
+    _require_valid_id(reel_id)
+    freed = archive.delete_entry(reel_id)
+    if freed is None:
+        raise HTTPException(404, "Archived reel not found.")
+    return {"deleted": reel_id, "freed_bytes": freed}

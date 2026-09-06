@@ -151,5 +151,27 @@ Reels download as `<first 5 letters of the video title>-<timestamp>.mp4`, e.g.
 `ricka-20260727-151225.mp4`, so repeated downloads don't overwrite each other.
 
 **`storage/jobs/` is wiped on every startup.** Job state is in-memory, so
-anything left on disk is orphaned once the server restarts. Download any reel
-you want to keep before restarting.
+anything left on disk is orphaned once the server restarts — but by the time
+that happens the finished reel is no longer in there (see below).
+
+## The archive
+
+Every reel that finishes generating is moved into `storage/archive/<id>/`
+along with a poster frame, the reference screenshot, and a `reel.json`
+sidecar of its stats and settings. Unlike `storage/jobs/`, **the archive is
+never wiped, by anyone, automatically** — it survives restarts and
+redeployments, and it lives on the same bind-mounted volume the rest of
+`storage/` uses, so it survives a container being replaced entirely, not just
+restarted.
+
+Browse it at `/archive` (linked from the main page): a thumbnail grid, newest
+first, with in-page playback, download, and deletion. **Deletion is
+permanent** — there is no undo, no recycle bin, and a confirmation naming the
+reel is the only safeguard. Because nothing is ever deleted automatically,
+the archive only grows; the page shows the running total size on disk so
+that filling the drive is a visible risk rather than a silent one, and it's
+on you to delete old reels if space gets tight.
+
+If archiving fails in the container with a permission error, the bind mount
+is not writable by uid 1000 — the same failure mode already documented above
+for `storage/jobs/`; the fix is the same `chown -R 1000:1000` step.
