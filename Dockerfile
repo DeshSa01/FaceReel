@@ -35,12 +35,12 @@ RUN pip install -r requirements-ytdlp.txt
 # code edit doesn't re-copy it.
 COPY models/ models/
 COPY static/ static/
-COPY app.py pipeline.py ./
+COPY app.py pipeline.py archive.py ./
 
 # uid 1000 matches the usual first non-root user on the host, so the
 # bind-mounted storage/ stays writable without a fight.
 RUN useradd --uid 1000 --create-home app \
- && mkdir -p storage/jobs \
+ && mkdir -p storage/jobs storage/archive \
  && chown -R app:app storage
 USER app
 # Docker does not reliably derive HOME from the USER instruction, and deno
