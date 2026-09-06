@@ -202,6 +202,7 @@
   </div>
 </main>
 
+<script src="/static/progress.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const stageNames = {
@@ -209,8 +210,6 @@ const stageNames = {
   scan: "Scanning for the person", refine: "Refining clip boundaries",
   track: "Measuring framing", stitch: "Cutting & stitching", done: "Done",
 };
-let pollTimer = null;
-
 // slider id -> default, mirroring pipeline.Tuning
 const knobs = { lead_in: 0, boundary_reach: 0, clip_gap: 0 };
 // full recall at minimum excess; reach/gap past 0.6 add junk without adding footage
@@ -284,8 +283,12 @@ $("form").addEventListener("submit", async e => {
     const res = await fetch("/api/jobs", { method: "POST", body });
     if (!res.ok) throw new Error((await res.json()).detail || "Failed to start job.");
     const { id } = await res.json();
+    // this page watched the job start, so the result card is allowed to
+    // auto-appear for it once FaceReelProgress reports it done (see below) --
+    // a job that was already done before this page ever saw it processing
+    // must not resurrect an old video player on an unrelated page load
+    watchedId = id;
     $("progress-card").classList.remove("hidden");
-    poll(id);
   } catch (err) {
     showFormError(err.message);
     $("go").disabled = false;
@@ -297,47 +300,42 @@ function showFormError(msg) {
   $("form-error").classList.remove("hidden");
 }
 
-function poll(id) {
-  clearInterval(pollTimer);
-  pollTimer = setInterval(async () => {
-    let job;
-    try {
-      const res = await fetch(`/api/jobs/${id}`);
-      if (!res.ok) throw new Error("Lost contact with the job.");
-      job = await res.json();
-    } catch (err) {
-      finish(); showFormError(err.message); return;
-    }
+// Tracks the one job this page has actually watched reach "processing", so a
+// stale "done"/"error" job already sitting in /api/jobs/active at page load
+// doesn't pop up a result or error the user never asked to see (research D10).
+let watchedId = null;
+
+window.FaceReelProgress.subscribe(job => {
+  if (job && job.status === "processing") {
+    watchedId = job.id;
+    $("go").disabled = true;
+    $("progress-card").classList.remove("hidden");
     $("stage-label").textContent = stageNames[job.stage] || "Working";
     $("bar").style.width = job.progress + "%";
     $("status-msg").textContent = job.message;
+    return;
+  }
 
-    if (job.status === "done") {
-      finish();
-      $("progress-card").classList.add("hidden");
-      $("result-card").classList.remove("hidden");
-      const r = job.result || {}, t = job.tuning || {};
-      $("player").src = `/api/jobs/${id}/output`;
-      $("download").href = `/api/jobs/${id}/output`;
-      // this attribute wins over the server's Content-Disposition for
-      // same-origin links, so it has to carry the real name
-      $("download").download = r.filename || "facereel.mp4";
-      $("stats").textContent =
-        `${r.clip_count} clip(s) · ${r.output_duration}s of footage from a ${r.source_duration}s video` +
-        ` · ${r.resolution}` + (t.zoom ? ` · ${r.zoomed_clips} zoomed` : "") +
-        ` · lead-in ${t.lead_in}s, reach ${t.boundary_reach}s, gap ${t.clip_gap}s`;
-    } else if (job.status === "error") {
-      finish();
-      $("progress-card").classList.add("hidden");
-      showFormError(job.message);
-    }
-  }, 1000);
-}
-
-function finish() {
-  clearInterval(pollTimer);
+  $("progress-card").classList.add("hidden");
   $("go").disabled = false;
-}
+  if (!job || job.id !== watchedId) return;
+
+  if (job.status === "done") {
+    $("result-card").classList.remove("hidden");
+    const r = job.result || {}, t = job.tuning || {};
+    $("player").src = `/api/jobs/${job.id}/output`;
+    $("download").href = `/api/jobs/${job.id}/output`;
+    // this attribute wins over the server's Content-Disposition for
+    // same-origin links, so it has to carry the real name
+    $("download").download = r.filename || "facereel.mp4";
+    $("stats").textContent =
+      `${r.clip_count} clip(s) · ${r.output_duration}s of footage from a ${r.source_duration}s video` +
+      ` · ${r.resolution}` + (t.zoom ? ` · ${r.zoomed_clips} zoomed` : "") +
+      ` · lead-in ${t.lead_in}s, reach ${t.boundary_reach}s, gap ${t.clip_gap}s`;
+  } else if (job.status === "error") {
+    showFormError(job.message);
+  }
+});
 </script>
 </body>
 </html>

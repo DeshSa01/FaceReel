@@ -98,6 +98,11 @@ async def create_job(
             "progress": 0, "message": "Starting...", "result": None,
             # echoed back on poll so a run can be tied to the values that made it
             "tuning": asdict(tuning),
+            # seeded (never read) so _worker's later update() only ever replaces
+            # a value instead of adding a key -- get_job iterates job.items(),
+            # and a dict that gains a key mid-iteration raises RuntimeError:
+            # dictionary changed size during iteration (research D6)
+            "output_path": None,
         }
 
     job_dir = os.path.join(JOBS_DIR, job_id)
@@ -110,6 +115,22 @@ async def create_job(
                      args=(job_id, url, screenshot_path, job_dir, tuning),
                      daemon=True).start()
     return {"id": job_id}
+
+
+@app.get("/api/jobs/active")
+def get_active_job():
+    # MUST stay declared above GET /api/jobs/{job_id}: FastAPI matches routes
+    # in declaration order, so below it "active" would be captured as a
+    # job_id and this endpoint would 404 forever -- a silent failure where
+    # the indicator simply never appears. Job ids are ^[0-9a-f]{12}$, so
+    # "active" can never collide with a real one; only the ordering matters.
+    with jobs_lock:
+        job = next((j for j in jobs.values() if j["status"] == "processing"), None)
+        if job is None and jobs:
+            job = next(reversed(jobs.values()))
+    if job is None:
+        return {"job": None}
+    return {"job": {k: v for k, v in job.items() if k != "output_path"}}
 
 
 @app.get("/api/jobs/{job_id}")
@@ -135,6 +156,16 @@ def index():
     # FileResponse sends no Cache-Control, so browsers heuristically cache the
     # page and keep serving a stale copy across restarts; force revalidation
     return FileResponse(os.path.join(BASE_DIR, "static", "index.html"),
+                        headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/static/progress.js")
+def progress_js():
+    # Same staleness hazard as index()/archive_page(), and more exposed: a
+    # stale copy of this file against a current app.py produces a bar that
+    # silently stops working after a redeploy, with nothing else looking wrong.
+    return FileResponse(os.path.join(BASE_DIR, "static", "progress.js"),
+                        media_type="application/javascript",
                         headers={"Cache-Control": "no-cache"})
 
 

@@ -124,6 +124,7 @@
   </div>
 </div>
 
+<script src="/static/progress.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 let entries = [];
@@ -157,7 +158,20 @@ async function load() {
     ? `${entries.length} reel(s) · ${fmtBytes(data.total_bytes)} total`
     : "";
   render();
+  openFromHash();
 }
+
+// The completion notice in the shared bar links to /archive#<id> -- the
+// archive entry id *is* the job id (research D9). hashchange, not just
+// load, is what makes the link work while already on this page, which is
+// exactly when it's needed most: the reel finishing while the user watches.
+function openFromHash() {
+  const id = location.hash.slice(1);
+  if (!id) return;
+  const entry = entries.find(e => e.id === id);
+  if (entry) openModal(entry);
+}
+window.addEventListener("hashchange", openFromHash);
 
 function render() {
   $("grid").innerHTML = "";

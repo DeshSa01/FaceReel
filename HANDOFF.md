@@ -207,7 +207,12 @@ sliders** (see §11); the constants above are just their defaults.
 - **Jobs are in-memory**: restarting uvicorn loses job history. Since anything
   left on disk is therefore orphaned, `clean_jobs_dir()` now **deletes every
   job folder at startup** (see §13) — `output.mp4` files no longer survive a
-  restart.
+  restart. Since the persistent-job-progress feature, this has a user-visible
+  side effect: a reel in flight during a restart is not silently lost from
+  view — `facereel.watching` (client-side, `static/progress.js`) notices the
+  reel is gone from `GET /api/jobs/active` and reports it as not finished,
+  rather than leaving the bottom bar frozen at its last percentage or making
+  it vanish as if the reel had completed.
 - **yt-dlp 403s intermittently** on YouTube. `_ydl()` retries once after 3s,
   which clears essentially all of it. Must invoke the venv's yt-dlp via
   `sys.executable -m yt_dlp`, not the Homebrew binary.

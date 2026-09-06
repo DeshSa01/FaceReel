@@ -10,9 +10,14 @@ continuous playable video.
 .venv/bin/uvicorn app:app --host 127.0.0.1 --port 8765
 ```
 
-Then open http://127.0.0.1:8765, paste a YouTube link, upload a clear
-screenshot of the person's face, and wait for the stitched video to appear
-in the player. One video is processed at a time.
+Then open http://127.0.0.1:8765, paste a YouTube link, and upload a clear
+screenshot of the person's face. One video is processed at a time; progress
+is shown in a bar pinned to the bottom of every page, including the archive,
+so there's no need to wait on the generator page for it to finish -- browse
+old reels, close the browser, or come back later, and the bar picks up
+wherever the reel actually is. It reports a finished or failed reel from
+whichever page you're on, and if the app was restarted while a reel was in
+flight, it says so instead of leaving a bar frozen partway.
 
 ## Run with Docker
 
