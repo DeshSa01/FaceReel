@@ -17,4 +17,9 @@ HANDOFF.md
 README.md
 docker-compose.yml
 
+# spec-driven planning artifacts: never copied into the image, and excluded
+# here so they stay out of the build context too
+specs/
+.specify/
+
 # models/ is NOT ignored -- the ONNX files are required at runtime

@@ -3,6 +3,15 @@ name: Build and push image
 on:
   push:
     branches: [main]
+    # paths-ignore rather than an allowlist: a new source file still builds by
+    # default, whereas an allowlist silently stops building when someone adds
+    # one. None of these paths reach the image -- .dockerignore excludes them.
+    paths-ignore:
+      - '**.md'
+      - 'specs/**'
+      - '.specify/**'
+      - '.claude/**'
+      - 'docker-compose.yml'
   workflow_dispatch:
 
 env:
