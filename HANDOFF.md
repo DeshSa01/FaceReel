@@ -622,7 +622,12 @@ first use. With a single consumer, one-video-at-a-time holds by construction.
    `--newline --progress-template` and `_run_streaming` reads it line by line.
    If a yt-dlp bump renames a `progress.*` field, the bar quietly goes back to
    a static "Downloading…" message; the download itself is unaffected.
-4. **Read handlers return deep copies made under the lock.** The 002-era
+4. **Network failures pause the queue instead of failing videos**
+   (`SessionStore.defer_for_network`, `NETWORK_RETRY_DELAYS`). Only errors
+   matching `pipeline.is_network_error` are retried. Widen that list
+   carefully: a misclassified permanent error costs ~45 minutes of a paused
+   queue before it fails.
+5. **Read handlers return deep copies made under the lock.** The 002-era
    "dictionary changed size during iteration" bug is the reason.
 
 ### Still open

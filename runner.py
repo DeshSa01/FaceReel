@@ -38,10 +38,18 @@ class Runner:
     def _loop(self):
         while True:
             with self.store.changed:
-                item = self.store.pick_next()
-                while item is None:
-                    self.store.changed.wait()
+                while True:
+                    # Paused after a network failure: everything else would
+                    # fail the same way, so the whole queue waits it out.
+                    # Adds and removals still notify; the loop just re-checks.
+                    pause = self.store.backoff_remaining()
+                    if pause > 0:
+                        self.store.changed.wait(pause)
+                        continue
                     item = self.store.pick_next()
+                    if item is not None:
+                        break
+                    self.store.changed.wait()
             kind, sid, video = item
             # A bug escaping here would kill the only consumer and silently
             # stop every session's queue, so nothing is allowed out.
@@ -89,7 +97,15 @@ class Runner:
         try:
             result = pipeline.process_job(video["url"], shot, job_dir, progress, tuning)
         except pipeline.PipelineError as e:
-            self.store.mark_failed(sid, vid, str(e))
+            error = str(e)
+            if pipeline.is_network_error(error):
+                delay = self.store.defer_for_network(sid, vid)
+                if delay is not None:
+                    print(f"Couldn't reach YouTube for {vid}; pausing the queue {delay}s.")
+                    return
+                total = sum(sessions.NETWORK_RETRY_DELAYS) // 60
+                error = f"Couldn't reach YouTube, even after retrying for about {total} minutes."
+            self.store.mark_failed(sid, vid, error)
             return
         except Exception as e:
             self.store.mark_failed(sid, vid, f"Unexpected error: {e}")

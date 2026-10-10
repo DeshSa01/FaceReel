@@ -77,6 +77,7 @@
     start: "Starting", reference: "Reading screenshot", download: "Downloading video",
     scan: "Scanning for the person", refine: "Refining clip boundaries",
     track: "Measuring framing", stitch: "Cutting & stitching", join: "Joining reels",
+    network: "Waiting for network",
     done: "Done",
   };
 

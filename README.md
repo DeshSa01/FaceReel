@@ -36,7 +36,11 @@ The joined video is identified by the session id. It shows on the session page
 (`/session/<id>`), in the archive with a **Session** badge, and at
 `/api/sessions/<id>/output`. Each video's own reel is archived as well, so if
 the join fails, nothing is lost. A video that fails (for example, the person
-isn't found) is skipped, and the session's summary says why. A waiting video
+isn't found) is skipped, and the session's summary says why. Losing the
+connection to YouTube is different: the video goes back in line and the whole
+queue pauses, then retries after 30 s, 1 m, 2 m, and so on up to 10 m. It gives
+up after eight retries, about 45 minutes. The bar and the session page show
+the countdown, and sessions stay open while they wait. A waiting video
 can be removed before it starts. A session that never got a video can be
 discarded.
 

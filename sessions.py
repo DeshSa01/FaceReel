@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import threading
+import time
 import uuid
 from datetime import datetime
 
@@ -32,6 +33,15 @@ SCREENSHOTS = "screenshots"
 # session's videos that have not been removed, so failures count and removals
 # free their slot (spec Assumptions).
 MAX_VIDEOS_PER_SESSION = 10
+
+# Waits, in seconds, before each retry of a video that failed only because
+# YouTube couldn't be reached (pipeline.is_network_error). Chosen, not
+# measured -- there is no record of how long outages here last (constitution
+# Principle II). Doubling from 30s rides out a router or Wi-Fi blip quickly
+# without hammering a network that is down. The 10-minute cap and the limit
+# of eight retries (~45 minutes in all) mean an error wrongly classed as a
+# network one blocks the queue for under an hour, not forever.
+NETWORK_RETRY_DELAYS = (30, 60, 120, 240, 480, 600, 600, 600)
 
 # session states (data-model.md)
 OPEN, JOINING = "open", "joining"
@@ -122,6 +132,10 @@ class SessionStore:
         # (research D1).
         self._runtime = {}
         self._running_join = None
+        # Set while the runner is paused after a network failure:
+        # {sid, vid, until (monotonic), retry}. Memory only -- after a restart
+        # the video is simply retried at once, which is what a restart is for.
+        self._backoff = None
         self._next_seq = 1
 
     # ---- start-up -------------------------------------------------------
@@ -350,10 +364,45 @@ class SessionStore:
         if not waiting:
             return None
         _, s, v = min(waiting, key=lambda t: t[0])
+        self._backoff = None
         v["state"] = PROCESSING
         _write_session(s)
         self._runtime[v["id"]] = {"stage": "start", "progress": 0, "message": "Starting..."}
         return ("video", s["id"], copy.deepcopy(v))
+
+    def defer_for_network(self, sid, vid):
+        """Put a video that couldn't reach YouTube back in line, in its
+        original place, and pause the runner for the next backoff delay.
+        Returns the delay, or None once the retries are used up -- the caller
+        then fails the video. Back in "waiting", the video keeps its session
+        open: a network blip must not complete a session as "nothing to join"
+        (the 2026-10-10 outage that prompted this)."""
+        with self._lock:
+            s = self._sessions[sid]
+            v = next(v for v in s["videos"] if v["id"] == vid)
+            done = v.get("network_retries", 0)
+            if done >= len(NETWORK_RETRY_DELAYS):
+                return None
+            delay = NETWORK_RETRY_DELAYS[done]
+            v.update(state=WAITING, network_retries=done + 1)
+            self._runtime.pop(vid, None)
+            self._backoff = {"sid": sid, "vid": vid, "retry": done + 1,
+                             "until": time.monotonic() + delay}
+            _write_session(s)
+            return delay
+
+    def backoff_remaining(self):
+        """Seconds the runner should still wait. Caller holds the lock."""
+        if self._backoff is None:
+            return 0
+        return max(0.0, self._backoff["until"] - time.monotonic())
+
+    def _backoff_message(self):
+        b = self._backoff
+        secs = int(self.backoff_remaining() + 0.999)
+        when = f"{secs // 60}m {secs % 60:02d}s" if secs >= 60 else f"{secs}s"
+        return (f"Couldn't reach YouTube. Retrying in {when} "
+                f"(retry {b['retry']} of {len(NETWORK_RETRY_DELAYS)}).")
 
     def set_progress(self, key, stage, pct, message):
         with self._lock:
@@ -485,6 +534,9 @@ class SessionStore:
         out["display_index"] = self._display_index(s, v)
         if v["state"] == PROCESSING:
             out.update(self._runtime.get(v["id"], {"stage": "start", "progress": 0, "message": ""}))
+        if v["state"] == WAITING and self._backoff and self._backoff["vid"] == v["id"] \
+                and self.backoff_remaining() > 0:
+            out["network_wait"] = self._backoff_message()
         if v["state"] == WAITING:
             # Split out work from other sessions: without it, a video queued
             # behind someone else's earlier-added video looks stuck, because
@@ -533,6 +585,14 @@ class SessionStore:
                         return {"id": v["id"], "kind": "video", "session_id": s["id"],
                                 "index": self._display_index(s, v), "total": self._total(s),
                                 "status": "processing", **rt}
+            if self._backoff and self.backoff_remaining() > 0:
+                b = self._backoff
+                s = self._sessions[b["sid"]]
+                v = next(v for v in s["videos"] if v["id"] == b["vid"])
+                return {"id": v["id"], "kind": "video", "session_id": s["id"],
+                        "index": self._display_index(s, v), "total": self._total(s),
+                        "status": "processing", "stage": "network", "progress": 0,
+                        "message": self._backoff_message()}
             if self._running_join is not None:
                 sid = self._running_join
                 rt = self._runtime.get(sid, {"stage": "join", "progress": 0, "message": ""})

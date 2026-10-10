@@ -82,10 +82,16 @@ ZOOM_SAMPLE_INTERVAL = 0.3
 # disk for debugging, but a person needs one sentence. Checked in order; the
 # first match wins. Only "Command failed" text is rewritten -- PipelineErrors
 # raised by the pipeline itself are already written for people.
+# What a failure to reach YouTube looks like in yt-dlp's output. These are
+# the only errors worth retrying: everything else (private, removed, person
+# not found) fails the same way every time.
+_NETWORK_NEEDLES = (
+    "Connection refused", "Connection reset", "timed out", "Network is unreachable",
+    "Temporary failure in name resolution", "nodename nor servname", "getaddrinfo",
+)
+
 _FRIENDLY_ERRORS = [
-    (("Connection refused", "Connection reset", "timed out", "Network is unreachable",
-      "Temporary failure in name resolution", "nodename nor servname", "getaddrinfo"),
-     "Couldn't reach YouTube: the network connection failed."),
+    (_NETWORK_NEEDLES, "Couldn't reach YouTube: the network connection failed."),
     (("Private video",), "This video is private."),
     (("Sign in to confirm your age", "age-restricted"),
      "YouTube requires sign-in for this video (age-restricted)."),
@@ -98,6 +104,10 @@ _FRIENDLY_ERRORS = [
     (("Unsupported URL", "is not a valid URL"), "That link isn't a video yt-dlp can download."),
     (("No space left on device",), "The server ran out of disk space."),
 ]
+
+
+def is_network_error(text):
+    return bool(text) and any(n in text for n in _NETWORK_NEEDLES)
 
 
 def friendly_error(text):

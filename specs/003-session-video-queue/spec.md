@@ -148,6 +148,7 @@ confirm it is never processed and is absent from the session's joined video.
 - **Joining takes time.** Joining up to ten reels is itself work on a machine where encoding is the bottleneck. The session shows that it is being joined, with progress, so a long join is distinguishable from a stall.
 - **The same video is added twice.** Allowed: it may be intentional (for example, with different settings). No deduplication.
 - **A video is added to a session that is being joined or has ended.** Refused with a message; the user is offered a new session.
+- **The network drops mid-queue.** Covered by FR-014a: the queue pauses rather than failing every waiting video in turn, and sessions stay open.
 - **Disk fills during a long session.** The failing step reports the failure; reels already produced are not removed.
 
 ## Requirements *(mandatory)*
@@ -174,6 +175,7 @@ confirm it is never processed and is absent from the session's joined video.
 - **FR-012**: Users MUST be able to remove a video that is waiting and has not started. A removed video MUST NOT be processed and MUST NOT appear in the joined reel.
 - **FR-013**: A video that is processing MUST NOT be removable or cancellable through this feature.
 - **FR-014**: When a video fails, the session MUST record the reason and continue with the next waiting video.
+- **FR-014a**: A video that fails only because YouTube could not be reached MUST NOT be marked failed. It MUST return to its place in line, and the whole queue MUST pause and retry with increasing delays. A failure to reach YouTube means every video would fail the same way. The page MUST show that it is waiting for the network and when it will retry. After a bounded number of retries the video fails with that reason, so a misclassified error cannot block the queue indefinitely. *(Added 2026-10-10, after a brief outage failed six queued videos in under a minute and closed their sessions as "nothing to join".)*
 
 **Visibility**
 

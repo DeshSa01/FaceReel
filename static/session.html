@@ -444,6 +444,9 @@ function videoRow(v) {
                   done: "done", failed: "failed", removed: "removed" }[v.state];
   head.appendChild(el("span", `q-state ${v.state}`, label));
   li.appendChild(head);
+  if (v.state === "waiting" && v.network_wait) {
+    li.appendChild(el("div", "q-detail failed", v.network_wait));
+  }
   if (v.state === "waiting" && v.ahead_other) {
     // the whole app runs one video at a time, oldest session first, and never
     // interrupts the video in progress -- so this session can sit idle behind
