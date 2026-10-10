@@ -617,7 +617,11 @@ holds by construction.
    `done` from the archive rather than re-run. If a stale `archive/.tmp-<id>`
    was left behind, it's removed before anything is retried. Both have been
    tested by forging the on-disk state (see the quickstart).
-3. **Read handlers return deep copies made under the lock.** The 002-era
+3. **Download progress is parsed from yt-dlp's output.** `_ydl` passes
+   `--newline --progress-template` and `_run_streaming` reads it line by line.
+   If a yt-dlp bump renames a `progress.*` field, the bar quietly goes back to
+   a static "Downloading…" message; the download itself is unaffected.
+4. **Read handlers return deep copies made under the lock.** The 002-era
    "dictionary changed size during iteration" bug is the reason.
 
 ### Still open

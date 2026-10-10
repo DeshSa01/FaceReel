@@ -156,10 +156,119 @@ def _run(cmd, **kwargs):
     return result
 
 
-def _ydl(format_spec, out_path, url):
+# One machine-readable line per progress update, parsed by _parse_ydl_progress.
+# NA fills any field yt-dlp doesn't know (e.g. total size early in an HLS
+# download, where it is only estimated from the fragments seen so far).
+_YDL_PROGRESS_PREFIX = "FRPROG"
+_YDL_PROGRESS_TEMPLATE = (
+    "download:" + _YDL_PROGRESS_PREFIX +
+    " %(info.format_id)s %(progress.downloaded_bytes)s %(progress.total_bytes)s"
+    " %(progress.total_bytes_estimate)s %(progress.speed)s %(progress.eta)s"
+)
+
+
+def _num(text):
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _parse_ydl_progress(line):
+    parts = line.split()
+    if len(parts) != 7 or parts[0] != _YDL_PROGRESS_PREFIX:
+        return None
+    downloaded, total, estimate, speed, eta = (_num(x) for x in parts[2:])
+    return {"format_id": parts[1], "downloaded": downloaded or 0,
+            "total": total or estimate, "estimated": not total,
+            "speed": speed, "eta": eta}
+
+
+def _fmt_bytes(n):
+    for unit in ("B", "KB", "MB"):
+        if n < 1024:
+            return f"{n:.1f} {unit}" if unit == "MB" and n < 10 else f"{n:.0f} {unit}"
+        n /= 1024
+    return f"{n:.2f} GB"
+
+
+def _fmt_eta(seconds):
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60:02d}s"
+    return f"{seconds // 3600}h {seconds % 3600 // 60:02d}m"
+
+
+def _ydl_progress_reporter(progress, label, lo, hi):
+    """Turn yt-dlp progress lines into progress() calls spanning lo..hi.
+
+    A "video+audio" selection downloads two streams one after the other, each
+    with its own byte count. The first (video) is nearly all of the bytes, so
+    it gets 90% of the span and anything after it the remainder. Updates are
+    capped at two a second: yt-dlp reports far more often than the bar polls.
+    """
+    state = {"streams": [], "last": 0.0}
+
+    def on_line(line):
+        p = _parse_ydl_progress(line)
+        if p is None:
+            if line.startswith("[Merger]"):
+                progress("download", hi, f"Merging the {label}'s video and audio...")
+            return
+        if not state["streams"] or state["streams"][-1] != p["format_id"]:
+            state["streams"].append(p["format_id"])
+        now = time.monotonic()
+        if now - state["last"] < 0.5:
+            return
+        state["last"] = now
+        first = len(state["streams"]) == 1
+        frac = min(p["downloaded"] / p["total"], 1.0) if p["total"] else 0.0
+        if p["estimated"]:
+            # An HLS total is extrapolated from the fragments seen so far (the
+            # very first report can read 1 KB of 1 KB), so never claim done.
+            frac = min(frac, 0.99)
+        pct = lo + (hi - lo) * (0.9 * frac if first else 0.9 + 0.1 * frac)
+        what = f"{label} ({'video' if first else 'audio'} stream)"
+        detail = _fmt_bytes(p["downloaded"])
+        if p["total"]:
+            detail += f" of {'~' if p['estimated'] else ''}{_fmt_bytes(p['total'])} ({frac:.0%})"
+        if p["speed"]:
+            detail += f" · {_fmt_bytes(p['speed'])}/s"
+        if p["eta"] is not None:
+            detail += f" · ~{_fmt_eta(p['eta'])} left"
+        progress("download", pct, f"Downloading {what}: {detail}")
+
+    return on_line
+
+
+def _run_streaming(cmd, on_line):
+    """Like _run, but hands each output line to on_line as it arrives, so a
+    long download can report progress instead of going quiet for minutes.
+    stderr is merged into stdout: two pipes read one after the other can
+    deadlock once the unread one fills."""
+    tail = []
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          text=True, bufsize=1) as proc:
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            if not line.startswith(_YDL_PROGRESS_PREFIX):
+                tail = (tail + [line])[-8:]
+            try:
+                on_line(line)
+            except Exception:
+                pass  # progress is cosmetic; never let it fail the download
+        proc.wait()
+    if proc.returncode != 0:
+        raise PipelineError(f"Command failed ({cmd[0]}):\n" + "\n".join(tail))
+
+
+def _ydl(format_spec, out_path, url, on_line=None):
     cmd = [
         sys.executable, "-m", "yt_dlp",
         "--no-playlist",
+        "--newline", "--progress-template", _YDL_PROGRESS_TEMPLATE,
         # YouTube signs media URLs behind a JS player challenge. Solving it
         # needs both a JS runtime on PATH (deno) and yt-dlp's EJS solver
         # scripts, which are not bundled and are fetched once into the yt-dlp
@@ -171,12 +280,13 @@ def _ydl(format_spec, out_path, url):
         "-o", out_path,
         url,
     ]
+    run = (lambda: _run_streaming(cmd, on_line)) if on_line else (lambda: _run(cmd))
     # YouTube intermittently 403s; one retry clears most transient failures
     try:
-        _run(cmd)
+        run()
     except PipelineError:
         time.sleep(3)
-        _run(cmd)
+        run()
 
 
 def _video_title(url):
@@ -245,7 +355,8 @@ def download_video(url, job_dir, progress, max_height=MAX_OUTPUT_HEIGHT):
     # Codec deliberately unconstrained here: YouTube only publishes H.264 up to
     # 1080p, so demanding it would silently cap the 4K toggle at 1080p. Only
     # the system ffmpeg ever decodes this file, and it handles AV1 and VP9.
-    _ydl(f"bv*[height<={max_height}]+ba/b[height<={max_height}]/b", source, url)
+    _ydl(f"bv*[height<={max_height}]+ba/b[height<={max_height}]/b", source, url,
+         _ydl_progress_reporter(progress, "source video", 2, 16))
     if not os.path.exists(source):
         raise PipelineError("Download finished but no video file was produced.")
 
@@ -263,7 +374,7 @@ def download_video(url, job_dir, progress, max_height=MAX_OUTPUT_HEIGHT):
              f"/b[height<={PROXY_HEIGHT}][vcodec^=avc1]"
              f"/bv*[height<={PROXY_HEIGHT}][ext=mp4]"
              f"/bv*[height<={PROXY_HEIGHT}]/b[height<={PROXY_HEIGHT}]",
-             proxy, url)
+             proxy, url, _ydl_progress_reporter(progress, "analysis copy", 18, 22))
     except PipelineError:
         proxy = source  # analysis falls back to the full-res file
     if not os.path.exists(proxy):

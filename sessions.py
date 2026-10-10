@@ -284,7 +284,7 @@ class SessionStore:
             _write_session(s)
             self.changed.notify_all()
             return {"id": vid, "index": self._display_index(s, video),
-                    "line_position": self._line_position(video)}
+                    "line_position": self._line_position(video, sid)}
 
     def remove_video(self, sid, vid):
         with self._lock:
@@ -419,17 +419,29 @@ class SessionStore:
                 return rank
         return None
 
-    def _line_position(self, video):
-        """The real wait across every session (spec edge case): waiting
-        videos ahead of it, plus joins (which run first), plus whatever is
+    def _wait_breakdown(self, video, own_sid):
+        """What a waiting video is queued behind, split by whether it belongs
+        to the same session. Joins count as other work: they run first."""
+        own = other = 0
+        for s in self._sessions.values():
+            for v in s["videos"]:
+                ahead = v["state"] == PROCESSING or (
+                    v["state"] == WAITING and v["seq"] < video["seq"])
+                if ahead:
+                    if s["id"] == own_sid:
+                        own += 1
+                    else:
+                        other += 1
+            if s["state"] == JOINING:
+                other += 1
+        return own, other
+
+    def _line_position(self, video, own_sid=None):
+        """The real wait across every session (spec edge case): everything
+        waiting ahead of it, plus joins (which run first), plus whatever is
         running now."""
-        ahead = sum(1 for s in self._sessions.values() for v in s["videos"]
-                    if v["state"] == WAITING and v["seq"] < video["seq"])
-        joins = sum(1 for s in self._sessions.values()
-                    if s["state"] == JOINING and s["id"] != self._running_join)
-        busy = self._running_join is not None or any(
-            v["state"] == PROCESSING for s in self._sessions.values() for v in s["videos"])
-        return 1 + ahead + joins + (1 if busy else 0)
+        own, other = self._wait_breakdown(video, own_sid)
+        return 1 + own + other
 
     def _summary(self, s):
         counts = {k: 0 for k in (WAITING, PROCESSING, DONE, FAILED, REMOVED)}
@@ -450,7 +462,12 @@ class SessionStore:
         if v["state"] == PROCESSING:
             out.update(self._runtime.get(v["id"], {"stage": "start", "progress": 0, "message": ""}))
         if v["state"] == WAITING:
-            out["line_position"] = self._line_position(v)
+            # Split out work from other sessions: without it, a video queued
+            # behind someone else's earlier-added video looks stuck, because
+            # nothing in its own session is moving (FR-010 serves by add time,
+            # not by session).
+            own, other = self._wait_breakdown(v, s["id"])
+            out.update(line_position=1 + own + other, ahead_own=own, ahead_other=other)
         return out
 
     def snapshot(self, sid):

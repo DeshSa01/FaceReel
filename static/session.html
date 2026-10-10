@@ -439,6 +439,13 @@ function videoRow(v) {
                   done: "done", failed: "failed", removed: "removed" }[v.state];
   head.appendChild(el("span", `q-state ${v.state}`, label));
   li.appendChild(head);
+  if (v.state === "waiting" && v.ahead_other) {
+    // the whole app runs one video at a time in the order videos were added,
+    // so this session can be idle while another session's earlier video runs
+    li.appendChild(el("div", "q-detail",
+      `Waiting on ${v.ahead_other} item(s) from other sessions, added before this one` +
+      (v.ahead_own ? ` and ${v.ahead_own} from this session.` : ".")));
+  }
   if (v.state === "processing") {
     li.appendChild(el("div", "q-detail", `${stageNames[v.stage] || "Working"} — ${v.message || ""}`));
     const track = el("div", "bar-track"), fill = el("div", "bar-fill");
