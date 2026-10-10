@@ -32,8 +32,9 @@ the *user* no longer has to enforce it by waiting.
 
 - Q: When is a session complete and ready to be joined into one video? → A: When its queue empties — at least one video has been added and none is waiting or processing. There is no explicit "finish" action.
 - Q: Which inputs are set once per session, and which for each video? → A: Every input (link, screenshot, tuning) is per video; the add-video form is prefilled with the previous video's screenshot and tuning.
-- Q: Can several sessions run at the same time? → A: Yes, any number; all sessions share one application-wide line, processed one video at a time in the order videos were added.
+- Q: Can several sessions run at the same time? → A: Yes, any number; all sessions share one application-wide line, processed one video at a time. *(Ordering revised below.)*
 - Q: What should happen to a running session if the application restarts? → A: Sessions and their queues survive the restart; the video that was interrupted starts over from the beginning, and waiting videos carry on.
+- Q: In what order does the shared line serve videos from different sessions? → A: By session: the session created first has all its waiting videos processed before a later session's, so it finishes and produces its reel first. Within a session, videos run in the order added. A video already processing is never interrupted. *(Revised after first use, 2026-10-10. The original answer was "in the order videos were added, regardless of session", which let a later session's video run while an earlier session sat idle.)*
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -138,7 +139,8 @@ confirm it is never processed and is absent from the session's joined video.
 - **A session is created but no video is ever added.** An empty session is not complete — completion needs at least one video — so it stays open and listed until a video is added or the user discards it (FR-024).
 - **The user removes the last waiting video while nothing is processing for the session.** The session's queue is now empty, so it completes and is joined from what has already finished.
 - **The 10-video limit is reached through removals.** Whether a removed waiting video frees its slot. Assumed yes: the limit counts videos in the session, and a removed video is no longer in it.
-- **Two sessions both have work waiting.** The machine still processes one video at a time across the whole application, so one session's videos wait for another's. The queue position shown to a user MUST reflect the real wait, not only their own session's queue.
+- **Two sessions both have work waiting.** The machine still processes one video at a time across the whole application. The older session's videos all go first (FR-010), so a newer session waits until the older one has nothing waiting. The queue position shown to a user MUST reflect the real wait, not only their own session's queue, and MUST say when the wait is for another session.
+- **A video is added to an older session while a newer session has videos waiting.** It goes ahead of the newer session's waiting videos, but behind the video currently processing.
 - **The application restarts mid-session.** Redeploys happen on every published image. Sessions resume (FR-020): the video that was processing starts over from the beginning, and its earlier partial progress is discarded. A session that was in the middle of being joined starts its join over.
 - **The application restarts repeatedly while the same video is processing.** Each restart starts that video over; it is not marked failed for having been interrupted.
 - **A video's reel fails to join** (for example, it is corrupt). The joining step reports the failure for the session rather than producing a truncated video presented as complete.
@@ -166,7 +168,7 @@ confirm it is never processed and is absent from the session's joined video.
 - **FR-007**: Each video added MUST specify its own source link, screenshot of the person, and tuning (zoom, 4K, clip fine-tuning). After the first video, the form MUST be prefilled with the screenshot and tuning of the session's most recently added video, so that adding another video of the same person needs only a new link.
 - **FR-008**: A session MUST hold at most 10 videos. An attempt to add an 11th MUST be refused with a message stating the limit, and MUST NOT affect the session.
 - **FR-009**: Videos within a session MUST be processed one at a time, in the order they were added.
-- **FR-010**: Across the whole application, at most one video MUST be processing at any moment. When several sessions have waiting videos, they MUST be served in the order the videos were added, regardless of session.
+- **FR-010**: Across the whole application, at most one video MUST be processing at any moment. When several sessions have waiting videos, they MUST be served session by session, in the order the sessions were created; within a session, in the order its videos were added. A video already processing MUST NOT be interrupted, so a video added to an older session waits only for the video in progress.
 - **FR-011**: A session MUST become complete at the moment it holds at least one video and none of its videos is waiting or processing. On completion it MUST stop accepting videos and be joined (FR-018). There is no separate user action to end a session.
 - **FR-011a**: While a session's only remaining video is processing, the session view MUST warn that the session will complete when that video finishes unless another video is added first.
 - **FR-012**: Users MUST be able to remove a video that is waiting and has not started. A removed video MUST NOT be processed and MUST NOT appear in the joined reel.

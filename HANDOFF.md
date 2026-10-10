@@ -589,9 +589,10 @@ progress (`specs/002-…`) were built before this and are still in place.
 The old model was one thread per job and a 409 if one was already running. Now
 every submission is accepted into a durable queue, and **one long-lived runner
 thread** (`runner.py`) decides what runs next. It runs any pending session join
-first, then the waiting video with the lowest global `seq` across *all*
-sessions. With a single consumer, "one video at a time, in the order added"
-holds by construction.
+first, then the next waiting video of the **oldest session** (by `created_at`),
+in that session's add order. A session started first therefore finishes first;
+that ordering replaced the original "add order across all sessions" after
+first use. With a single consumer, one-video-at-a-time holds by construction.
 
 - A session completes **automatically** when it has at least one video and none
   is waiting or processing. There is no "finish" button; that was the user's

@@ -8,7 +8,7 @@ Every durable record lives under `storage/sessions/<sid>/` (research D1). Runtim
 |---|---|---|---|
 | Session id `sid` | `^[0-9a-f]{12}$` | `uuid4().hex[:12]` | Re-rolled if `storage/sessions/<sid>` **or** `storage/archive/<sid>` exists (research D6) |
 | Video id `vid` | `^[0-9a-f]{12}$` | `uuid4().hex[:12]` | Re-rolled if it collides with any session's video, or with an archive entry. It becomes the video's archive entry id |
-| `seq` | positive int | global counter: `max(seq on disk) + 1` at start-up, incremented per add | Unique across all sessions. Defines the application-wide line (research D2) |
+| `seq` | positive int | global counter: `max(seq on disk) + 1` at start-up, incremented per add | Unique across all sessions. Orders videos *within* a session; the line orders by `(session created_at, session id, seq)` (research D2) |
 
 Every id received in a URL or form field is validated with `archive.valid_id` **before** it is used to build a path (FR-023, Constitution Principle V).
 
@@ -70,12 +70,12 @@ An element of `Session.videos`.
 | `error` | str \| null | On `failed`: the `PipelineError` text, or "Unexpected error: …" |
 | `stage`, `progress`, `message` | **(memory)** | Only while `processing`; same vocabulary as today's job record |
 
-**Derived**: `display_index` is the 1-based rank among this session's non-removed videos. It pairs with the session's `total`, which also excludes removed videos, so a display never reads "video 6 of 5". `line_position` for a `waiting` video = 1 + the number of `waiting` videos with a lower `seq` in *any* session + (1 if anything is processing or joining). This is the real wait across sessions that the spec's edge case requires.
+**Derived**: `display_index` is the 1-based rank among this session's non-removed videos. It pairs with the session's `total`, which also excludes removed videos, so a display never reads "video 6 of 5". `line_position` for a `waiting` video = 1 + everything ahead of it in queue order (waiting videos of older sessions, earlier videos of its own session) + whatever is processing + pending joins. `ahead_own` / `ahead_other` split that count by session, so the page can say when the wait is for another session.
 
 ### Video state transitions
 
 ```text
- waiting ──runner picks lowest seq──► processing ──pipeline+archive ok──► done
+ waiting ──runner picks first in queue order──► processing ──pipeline+archive ok──► done
     │                                     │
     │ DELETE (FR-012)                     └──PipelineError / exception──► failed
     ▼

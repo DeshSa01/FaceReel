@@ -90,10 +90,11 @@ Create a session with three videos. While video 2 is in the `scan` stage, stop u
 
 ### 7. Two sessions share one line (FR-005, FR-010)
 
-Create session A and add 2 videos. In a **second browser**, create session B and add 1 video. Then:
+Create session A and add 2 videos. In a **second browser**, create session B and add 1 video. Then add a third video to A. Then:
 
 - `GET /api/sessions` lists both (US3 scenario 1).
-- B's video shows `line_position` 2: it waits behind A's waiting video, not just behind its own session.
+- A's third video, added last, still goes ahead of B's video: the older session finishes first (FR-010).
+- B's video shows a `line_position` that counts all of A's remaining videos, and the page says it is waiting on another session.
 - Only one video is ever `processing` application-wide.
 - Join A from the second browser. Its queue matches the first browser's within 2 seconds (US3 scenario 3).
 

@@ -314,9 +314,18 @@ class SessionStore:
 
     # ---- runner interface (all called by runner.Runner) ----------------
 
+    @staticmethod
+    def _priority(s, v):
+        """Queue order (FR-010, revised 2026-10-10): sessions in the order they
+        were created, and within a session the order videos were added. A
+        session started first finishes first, even if a later session's
+        videos were added earlier. created_at is parsed rather than compared
+        as text, since its UTC offset changes across DST."""
+        return (datetime.fromisoformat(s["created_at"]), s["id"], v["seq"])
+
     def pick_next(self):
-        """Caller holds self.changed. Joins first, then the waiting video with
-        the lowest seq across every session (FR-010). Joins jump the line
+        """Caller holds self.changed. Joins first, then the first waiting
+        video in queue order (_priority). Joins jump the line
         because their inputs are all ready, their user is waiting on exactly
         that output, and a join usually costs seconds -- behind ten later
         videos it would wait for an hour (research D2)."""
@@ -326,7 +335,7 @@ class SessionStore:
             self._running_join = s["id"]
             self._runtime[s["id"]] = {"stage": "join", "progress": 0, "message": "Preparing to join..."}
             return ("join", s["id"], None)
-        waiting = [(v["seq"], s, v) for s in self._sessions.values()
+        waiting = [(self._priority(s, v), s, v) for s in self._sessions.values()
                    for v in s["videos"] if v["state"] == WAITING]
         if not waiting:
             return None
@@ -423,10 +432,11 @@ class SessionStore:
         """What a waiting video is queued behind, split by whether it belongs
         to the same session. Joins count as other work: they run first."""
         own = other = 0
+        mine = self._priority(self._sessions[own_sid], video)
         for s in self._sessions.values():
             for v in s["videos"]:
                 ahead = v["state"] == PROCESSING or (
-                    v["state"] == WAITING and v["seq"] < video["seq"])
+                    v["state"] == WAITING and self._priority(s, v) < mine)
                 if ahead:
                     if s["id"] == own_sid:
                         own += 1
@@ -436,7 +446,7 @@ class SessionStore:
                 other += 1
         return own, other
 
-    def _line_position(self, video, own_sid=None):
+    def _line_position(self, video, own_sid):
         """The real wait across every session (spec edge case): everything
         waiting ahead of it, plus joins (which run first), plus whatever is
         running now."""

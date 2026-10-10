@@ -23,14 +23,16 @@ One observation shapes the whole design: **today's concurrency model is "one thr
 **Decision**: Replace the per-job `threading.Thread` with a single runner thread, started in `lifespan` and parked on a `threading.Condition`. Its loop, under the store lock:
 
 1. If any session is in `joining`, run the oldest join (by `completed_at`).
-2. Otherwise take the waiting video with the lowest global `seq`, across all sessions, and mark it `processing`.
+2. Otherwise take the first waiting video in queue order, `(session created_at, session id, video seq)`, and mark it `processing`. *(Revised 2026-10-10: originally the lowest global `seq`. See the note below.)*
 3. Otherwise `wait()` on the condition until an add, removal, or recovery calls `notify()`.
 
 The pipeline and ffmpeg calls run **outside** the lock. Only the state transitions run under it.
 
 **Rationale**:
 - FR-010 requires at most one video processing application-wide, served in the order added regardless of session. A single consumer satisfies this by construction. Today's 409 check *enforces* the rule. A single consumer makes breaking it impossible.
-- A global monotonic `seq` (max on disk + 1, assigned at add time) defines "the order added" without relying on wall-clock time, which can step backwards (NTP, a container clock change).
+- Within a session, a global monotonic `seq` (max on disk + 1, assigned at add time) defines "the order added" without relying on wall-clock time, which can step backwards (NTP, a container clock change). Between sessions, the session's `created_at` decides. It is parsed rather than compared as text, because the UTC offset in it changes across DST. A clock step could misorder two sessions created moments apart, which is acceptable for a single user.
+
+**Ordering revised after first use (2026-10-10).** Pure add order across sessions let a newer session's video run while an older session sat idle. Removing the older session's waiting videos then looked like it changed nothing, because its next video was still behind the newer session's earlier-added one. The user's model is "the session started first finishes first", so ordering is now by session, then by add order. Processing is still never pre-empted.
 - SC-002 allows at most 5 seconds of idle between videos. The condition variable makes the hand-off immediate rather than polled.
 - Starting the thread in `lifespan` rather than at import follows the precedent `clean_jobs_dir()` records: importing the module must not have side effects.
 
@@ -39,7 +41,8 @@ The pipeline and ffmpeg calls run **outside** the lock. Only the state transitio
 **Alternatives rejected**:
 - *A thread per session.* Would break FR-010 unless the threads coordinated through a shared lock, which rebuilds the single consumer with more moving parts.
 - *`queue.Queue`.* It cannot remove a waiting item (FR-012) or report positions (FR-015), and it does not survive a restart. The authoritative line has to be the persisted session records, and a second in-memory copy would only drift from them.
-- *Round-robin across sessions.* Offered in clarification and declined in favour of strict add order.
+- *Round-robin across sessions.* Offered in clarification and declined.
+- *Strict add order across sessions.* The original choice. Replaced as described above.
 
 ## D3. Restart recovery reconciles against the archive
 

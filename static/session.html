@@ -440,10 +440,11 @@ function videoRow(v) {
   head.appendChild(el("span", `q-state ${v.state}`, label));
   li.appendChild(head);
   if (v.state === "waiting" && v.ahead_other) {
-    // the whole app runs one video at a time in the order videos were added,
-    // so this session can be idle while another session's earlier video runs
+    // the whole app runs one video at a time, oldest session first, and never
+    // interrupts the video in progress -- so this session can sit idle behind
+    // an older session's videos, or behind a newer session's running one
     li.appendChild(el("div", "q-detail",
-      `Waiting on ${v.ahead_other} item(s) from other sessions, added before this one` +
+      `Waiting on ${v.ahead_other} item(s) from other sessions` +
       (v.ahead_own ? ` and ${v.ahead_own} from this session.` : ".")));
   }
   if (v.state === "processing") {

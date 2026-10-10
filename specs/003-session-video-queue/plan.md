@@ -11,7 +11,7 @@ Let a user open a server-side **session**, queue up to ten videos in it without 
 Today's concurrency model is *one thread per job, refuse with 409 if busy*. This feature inverts it. Submissions are always accepted into a durable line, and **one long-lived runner thread** decides what runs next. Most of the design is about making that line survive the redeploy that every push to `main` triggers.
 
 - **`sessions.py` (new)**: the durable session store. Each session is `storage/sessions/<sid>/session.json` plus its screenshots, rewritten atomically on every state transition. A single lock guards it, and every read hands out snapshots. It owns the session/video state machine, the 10-video limit, auto-completion (FR-011), and restart recovery reconciled against the archive.
-- **`runner.py` (new)**: the single consumer. It runs pending joins first, then the waiting video with the lowest global `seq` across all sessions, then parks on a condition variable. It calls the existing `pipeline.process_job` and `archive.archive_job` unchanged.
+- **`runner.py` (new)**: the single consumer. It runs pending joins first, then the first waiting video in queue order (oldest session first, then add order), then parks on a condition variable. It calls the existing `pipeline.process_job` and `archive.archive_job` unchanged.
 - **`pipeline.join_reels` (new function)**: concat-copy when every reel's streams match. Otherwise it re-encodes every reel to a common canvas (the most common size and frame rate) with the encoder settings the per-video reels already use.
 - **`archive.archive_session` (new function)**: the joined reel becomes an archive entry **keyed by the session id**, with `kind: "session"`. Durability, listing, playback, download, and deletion come from code that already works and already validates ids.
 - **Pages**: `/` becomes the session chooser. A new `/session/<sid>` page holds the generator form (moved from `index.html`), the queue, and the joined result. `progress.js` gains session context, and raises one notice per session rather than one per video.
@@ -85,7 +85,7 @@ app.py                   # lifespan: clean jobs → load+recover sessions → st
                          # GET /api/jobs/{id}[/output] and the jobs dict removed.
 sessions.py              # NEW: SessionStore. Durable store, state machine, limit,
                          # completion, recovery, snapshots, line positions.
-runner.py                # NEW: single consumer thread. Joins first, then lowest seq.
+runner.py                # NEW: single consumer thread. Joins first, then oldest session's next video.
 pipeline.py              # + join_reels(paths, work_dir, progress). process_job unchanged.
 archive.py               # + archive_session(); sidecar kind/session_id/videos;
                          # archive_job gains an optional session_id.

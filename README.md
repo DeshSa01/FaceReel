@@ -18,8 +18,12 @@ link, screenshot of the person, and settings. After the first one, the form
 keeps the previous video's screenshot and settings, so adding another video of
 the same person takes just a link. The first video starts processing as soon
 as it's added; later ones wait their turn. Every session, from every browser,
-shares one queue: the machine processes **one video at a time, in the order
-videos were added**.
+shares one queue, and the machine processes **one video at a time, oldest
+session first**. A session started earlier gets all of its videos done, and
+its joined reel made, before a later session's videos start. Within a session,
+videos run in the order they were added. The video currently processing is
+never interrupted. A waiting video's row on the session page says when it is
+waiting on another session.
 
 **A session finishes on its own once its queue is empty**, meaning nothing is
 waiting and nothing is processing. It then joins every successful video's reel,
