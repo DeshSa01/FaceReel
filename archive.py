@@ -15,6 +15,8 @@ import subprocess
 from dataclasses import asdict
 from datetime import datetime
 
+from pipeline import friendly_error
+
 BASE_DIR = os.path.dirname(__file__)
 ARCHIVE_DIR = os.path.join(BASE_DIR, "storage", "archive")
 SIDECAR_NAME = "reel.json"
@@ -203,6 +205,10 @@ def list_entries():
         size = _dir_size(de.path)
         total_bytes += size
         thumb, screenshot, video = entry.get("thumb"), entry.get("screenshot"), entry.get("video")
+        if entry.get("videos"):
+            # sidecars keep the raw reason; the listing shows one sentence
+            entry["videos"] = [{**v, "reason": friendly_error(v.get("reason"))}
+                               for v in entry["videos"]]
         entries.append({
             "kind": "video",
             **{k: v for k, v in entry.items() if k not in ("video", "thumb", "screenshot")},

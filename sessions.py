@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime
 
 import archive
+from pipeline import friendly_error
 
 BASE_DIR = os.path.dirname(__file__)
 SESSIONS_DIR = os.path.join(BASE_DIR, "storage", "sessions")
@@ -97,6 +98,15 @@ def _read_session(path):
     except (OSError, ValueError) as e:
         print(f"Skipping unreadable session file {path}: {e}")
         return None
+
+
+def _friendly_result(result):
+    """The per-video summary in a session's result carries each failure's
+    reason; show it the same way a failed queue row does."""
+    if not result or not result.get("videos"):
+        return result
+    return {**result, "videos": [{**v, "reason": friendly_error(v.get("reason"))}
+                                 for v in result["videos"]]}
 
 
 class SessionStore:
@@ -467,7 +477,11 @@ class SessionStore:
 
     def _public_video(self, s, v):
         out = {k: v[k] for k in ("id", "index", "url", "tuning", "state", "added_at",
-                                 "finished_at", "title", "result", "error")}
+                                 "finished_at", "title", "result")}
+        # the stored error stays raw for debugging; people get one sentence
+        out["error"] = friendly_error(v["error"])
+        if v["error"] and out["error"] != v["error"]:
+            out["error_detail"] = v["error"]
         out["display_index"] = self._display_index(s, v)
         if v["state"] == PROCESSING:
             out.update(self._runtime.get(v["id"], {"stage": "start", "progress": 0, "message": ""}))
@@ -497,8 +511,8 @@ class SessionStore:
                 "videos": [self._public_video(s, v) for v in s["videos"]],
                 "join": (dict(self._runtime[sid]) if s["state"] == JOINING and sid in self._runtime
                          else None),
-                "result": s["result"],
-                "error": s["error"],
+                "result": _friendly_result(s["result"]),
+                "error": friendly_error(s["error"]),
             })
             return copy.deepcopy(out)
 

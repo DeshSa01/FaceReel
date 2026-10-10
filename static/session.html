@@ -152,9 +152,8 @@
     <strong id="ended-title"></strong>
     <video id="player" class="hidden" controls playsinline></video>
     <p class="stats" id="ended-stats"></p>
-    <p class="error hidden" id="ended-error"></p>
-    <ul class="queue" id="ended-videos"></ul>
     <a class="dl hidden" id="download">Download joined reel</a>
+    <p class="error hidden" id="ended-error"></p>
     <button type="button" id="new-session">Start a new session</button>
   </div>
 
@@ -327,6 +326,12 @@ let prefillApplied = null;  // from_video whose tuning was last copied into the 
 let playerSrcSet = false;
 let submitting = false;
 
+function shortUrl(u) {
+  try {
+    const x = new URL(u), id = x.searchParams.get("v");
+    return id ? `youtube.com/watch?v=${id}` : x.host + x.pathname;
+  } catch { return u || ""; }
+}
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -434,7 +439,7 @@ function videoRow(v) {
   const li = el("li", v.state);
   const head = el("div", "q-head");
   head.appendChild(el("span", "q-num", v.display_index ? `${v.display_index}.` : "–"));
-  head.appendChild(el("span", "q-title", v.title || v.url));
+  head.appendChild(el("span", "q-title", v.title || shortUrl(v.url)));
   const label = { waiting: `#${v.line_position} in line`, processing: "processing",
                   done: "done", failed: "failed", removed: "removed" }[v.state];
   head.appendChild(el("span", `q-state ${v.state}`, label));
@@ -461,7 +466,10 @@ function videoRow(v) {
     d.appendChild(a);
     li.appendChild(d);
   } else if (v.state === "failed") {
-    li.appendChild(el("div", "q-detail failed", v.error || "Failed."));
+    const d = el("div", "q-detail failed", v.error || "Failed.");
+    // the full tool output, for whoever is debugging, without filling the page
+    if (v.error_detail) d.title = v.error_detail;
+    li.appendChild(d);
   } else if (v.state === "waiting" && session.state === "open") {
     const d = el("div", "q-detail");
     // only waiting videos can be removed (FR-012/013); no confirm dialog,
@@ -501,14 +509,11 @@ function renderEnded(s) {
     $("ended-error").textContent = s.error || "";
     $("ended-error").classList.remove("hidden");
   }
-  // name every video that didn't make it into the reel (US2 scenario 3)
-  const list = $("ended-videos");
-  list.innerHTML = "";
-  for (const v of (r.videos || []).filter(v => v.state !== "joined")) {
-    const li = el("li", "failed");
-    li.appendChild(el("div", "q-title", v.title || v.url));
-    li.appendChild(el("div", "q-detail failed", v.reason || v.state));
-    list.appendChild(li);
+  // The queue below names each video that didn't make it and why (US2
+  // scenario 3), so the summary only counts them rather than repeating it.
+  const missed = (r.videos || []).filter(v => v.state !== "joined").length;
+  if (missed) {
+    $("ended-stats").textContent += ` · ${missed} video(s) not included — see the queue below`;
   }
 }
 // the joined reel was deleted from the archive after the session finished

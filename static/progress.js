@@ -119,6 +119,10 @@
     bar.classList.remove("fp-stale");
   }
 
+  function onSessionPage(sid) {
+    return location.pathname.endsWith(`/session/${sid}`);
+  }
+
   function sessionLink(sid, text) {
     const link = document.createElement("a");
     link.className = "fp-link"; link.href = `/session/${sid}`; link.textContent = text;
@@ -138,7 +142,7 @@
     fillEl.style.width = (job.progress || 0) + "%";
     actionsEl.innerHTML = "";
     // no link from the session's own page -- it's already showing this
-    if (!location.pathname.endsWith(`/session/${job.session_id}`)) {
+    if (!onSessionPage(job.session_id)) {
       actionsEl.appendChild(sessionLink(job.session_id, "Open session"));
     }
     showBar();
@@ -157,7 +161,7 @@
     stageEl.textContent = job.state === "finished" ? "Session reel ready" : "Session finished — nothing to join";
     msgEl.textContent = job.message || "Done!";
     actionsEl.innerHTML = "";
-    actionsEl.appendChild(sessionLink(job.session_id, "View session"));
+    if (!onSessionPage(job.session_id)) actionsEl.appendChild(sessionLink(job.session_id, "View session"));
     actionsEl.appendChild(dismissButton(() => { setAcknowledged(job.id); hideBar(); }));
     showBar();
   }
@@ -169,7 +173,7 @@
     stageEl.textContent = "Session reel failed";
     msgEl.textContent = job.message || "Something went wrong.";
     actionsEl.innerHTML = "";
-    actionsEl.appendChild(sessionLink(job.session_id, "View session"));
+    if (!onSessionPage(job.session_id)) actionsEl.appendChild(sessionLink(job.session_id, "View session"));
     actionsEl.appendChild(dismissButton(() => { setAcknowledged(job.id); hideBar(); }));
     showBar();
   }

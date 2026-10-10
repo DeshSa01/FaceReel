@@ -93,10 +93,27 @@
     color: #fff; background: var(--accent); border-radius: 4px; padding: 1px 6px;
     margin-right: 6px; vertical-align: 1px;
   }
-  .m-videos { list-style: none; padding: 0; margin-top: 10px; font-size: 0.85rem; }
-  .m-videos li { padding: 4px 0; color: var(--muted); }
-  .m-videos li.joined { color: var(--text); }
-  .m-from { font-size: 0.85rem; margin-top: 8px; }
+  .m-videos { margin-top: 14px; }
+  .m-group + .m-group { margin-top: 12px; }
+  .m-group h3 {
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .m-group ul { list-style: none; padding: 0; }
+  .m-group li {
+    display: flex; gap: 8px; align-items: baseline; padding: 5px 0;
+    border-top: 1px solid var(--border); font-size: 0.85rem;
+  }
+  .m-group li:first-child { border-top: none; }
+  .m-mark { flex: none; width: 1em; text-align: center; }
+  .m-mark.ok { color: var(--accent); }
+  .m-mark.no { color: var(--error); }
+  .m-body { flex: 1; min-width: 0; }
+  .m-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  a.m-name { text-decoration: none; }
+  a.m-name:hover { text-decoration: underline; }
+  .m-reason { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 1px; }
+  .m-from { font-size: 0.85rem; margin-top: 10px; }
   .m-from a { color: var(--accent); }
 </style>
 </head>
@@ -118,9 +135,9 @@
   <div class="modal">
     <h2 id="m-title"></h2>
     <p class="reel-meta" id="m-meta"></p>
-    <p class="m-from hidden" id="m-from"></p>
-    <ul class="m-videos hidden" id="m-videos"></ul>
     <video id="m-player" controls playsinline></video>
+    <p class="m-from hidden" id="m-from"></p>
+    <div class="m-videos hidden" id="m-videos"></div>
     <div class="modal-actions">
       <a class="dl" id="m-download">Download</a>
       <button class="close" id="m-close">Close</button>
@@ -215,6 +232,49 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// "youtube.com/watch?v=ID" rather than the whole link, for videos whose
+// title was never fetched because they failed before download
+function shortUrl(u) {
+  try {
+    const x = new URL(u), id = x.searchParams.get("v");
+    return id ? `youtube.com/watch?v=${id}` : x.host + x.pathname;
+  } catch { return u || ""; }
+}
+
+function videoGroup(parent, heading, items, ok) {
+  if (!items.length) return;
+  const group = document.createElement("div");
+  group.className = "m-group";
+  const h = document.createElement("h3");
+  h.textContent = `${heading} (${items.length})`;
+  group.appendChild(h);
+  const ul = document.createElement("ul");
+  for (const v of items) {
+    const li = document.createElement("li");
+    const mark = document.createElement("span");
+    mark.className = `m-mark ${ok ? "ok" : "no"}`;
+    mark.textContent = ok ? "✓" : "✕";
+    const body = document.createElement("span");
+    body.className = "m-body";
+    const name = document.createElement(v.url ? "a" : "span");
+    name.className = "m-name";
+    name.textContent = v.title || shortUrl(v.url);
+    if (v.url) { name.href = v.url; name.target = "_blank"; name.rel = "noopener"; }
+    body.appendChild(name);
+    if (!ok) {
+      const reason = document.createElement("span");
+      reason.className = "m-reason";
+      reason.textContent = v.state === "skipped" ? "Its reel was deleted before the join."
+        : (v.reason || "Failed.");
+      body.appendChild(reason);
+    }
+    li.append(mark, body);
+    ul.appendChild(li);
+  }
+  group.appendChild(ul);
+  parent.appendChild(group);
+}
+
 function openModal(e) {
   current = e;
   $("m-title").textContent = e.title || "(untitled)";
@@ -225,12 +285,10 @@ function openModal(e) {
   const vids = $("m-videos"), from = $("m-from");
   vids.innerHTML = "";
   vids.classList.toggle("hidden", e.kind !== "session");
-  for (const v of (e.kind === "session" ? e.videos || [] : [])) {
-    const li = document.createElement("li");
-    li.className = v.state;
-    li.textContent = `${v.state === "joined" ? "✓" : "✗"} ${v.title || v.url}` +
-      (v.reason ? ` — ${v.reason}` : "");
-    vids.appendChild(li);
+  if (e.kind === "session") {
+    const all = e.videos || [];
+    videoGroup(vids, "Joined", all.filter(v => v.state === "joined"), true);
+    videoGroup(vids, "Not included", all.filter(v => v.state !== "joined"), false);
   }
   from.innerHTML = "";
   from.classList.toggle("hidden", !e.session_id);

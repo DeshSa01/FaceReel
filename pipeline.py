@@ -78,6 +78,44 @@ ZOOM_FACE_TOP_BIAS = 0.38
 ZOOM_SAMPLE_INTERVAL = 0.3
 
 
+# Raw tool output (yt-dlp's retry chatter, ffmpeg's last lines) is kept on
+# disk for debugging, but a person needs one sentence. Checked in order; the
+# first match wins. Only "Command failed" text is rewritten -- PipelineErrors
+# raised by the pipeline itself are already written for people.
+_FRIENDLY_ERRORS = [
+    (("Connection refused", "Connection reset", "timed out", "Network is unreachable",
+      "Temporary failure in name resolution", "nodename nor servname", "getaddrinfo"),
+     "Couldn't reach YouTube: the network connection failed."),
+    (("Private video",), "This video is private."),
+    (("Sign in to confirm your age", "age-restricted"),
+     "YouTube requires sign-in for this video (age-restricted)."),
+    (("not a bot",), "YouTube asked to confirm this isn't a bot. Try again later."),
+    (("members-only", "Join this channel"), "This video is for channel members only."),
+    (("Video unavailable", "This video is not available", "has been removed"),
+     "This video is unavailable on YouTube."),
+    (("HTTP Error 403", "403: Forbidden"),
+     "YouTube refused the download (HTTP 403). yt-dlp may need updating."),
+    (("Unsupported URL", "is not a valid URL"), "That link isn't a video yt-dlp can download."),
+    (("No space left on device",), "The server ran out of disk space."),
+]
+
+
+def friendly_error(text):
+    """One readable sentence for an error shown to a person. Idempotent, so
+    it can be applied at read time to errors stored before it existed."""
+    if not text or not text.startswith("Command failed"):
+        return text
+    for needles, message in _FRIENDLY_ERRORS:
+        if any(n in text for n in needles):
+            return message
+    lines = [l for l in text.splitlines() if l.strip()]
+    errors = [l for l in lines if l.startswith("ERROR:")]
+    line = (errors[-1] if errors else lines[-1]).removeprefix("ERROR:").strip()
+    # drop yt-dlp's "[youtube] <id>: " prefix; the row already names the video
+    line = re.sub(r"^\[[\w:]+\] [\w-]+: ", "", line)
+    return line if len(line) <= 160 else line[:157] + "..."
+
+
 class PipelineError(Exception):
     """User-facing pipeline failure."""
 
