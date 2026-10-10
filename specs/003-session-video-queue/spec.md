@@ -193,6 +193,7 @@ confirm it is never processed and is absent from the session's joined video.
 
 **Identifiers and safety**
 
+- **FR-025**: Users MUST be able to retry all of a session's failed videos in one action, from the session page or the session reel in the archive. Retried videos return to the queue in their original order. A session that had ended reopens, and when its queue empties again it MUST be joined again from all its successful videos, with the new reel replacing the old one under the same session id. The replacement MUST be crash-safe: at no point may the session have neither reel. *(Added 2026-10-10.)*
 - **FR-024**: Users MUST be able to discard a session to which no video has ever been added. A session with videos cannot be discarded through this feature.
 - **FR-023**: Any session identifier received from outside the application MUST be validated against the identifier format before it is used to locate anything on disk.
 
@@ -224,7 +225,7 @@ confirm it is never processed and is absent from the session's joined video.
 - **Join order is the order videos were added.** Reordering a queue is out of scope.
 - **Cancelling a video that is already processing is out of scope.** It is a change to the pipeline, not to queueing.
 - **Joined reels are subject to the same archive deletion as single reels.** Deleting a session's joined reel from the archive does not delete its individual reels, and vice versa.
-- **Ended sessions are not re-opened.** Adding more videos after a session ends means creating a new session.
+- **Ended sessions are re-opened only by a retry** (FR-025). Otherwise, adding more videos after a session ends means creating a new session. While a retry has a session open, more videos can be added to it as usual.
 - **Resuming an interrupted video partway is out of scope.** A video cut off by a restart starts again from the beginning (FR-020); only the session and its queue are restart-proof, not an individual video's progress.
 - **Sessions complete on their own.** Because a session completes as soon as its queue empties (FR-011), a user who wants many videos in one session adds them while earlier ones are still processing.
 - **Supersedes parts of the persistent-progress feature (002).** Progress may restart at 0% after a restart (replaces 002 FR-007 across restarts). The terminal notice is per session, not per reel (002 FR-008). A restart re-queues work instead of reporting it unfinished (002 FR-012). Submitting while a video processes is now allowed (002 FR-014). All other 002 requirements stand.

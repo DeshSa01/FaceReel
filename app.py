@@ -122,6 +122,12 @@ async def add_video(
                          upload=upload, screenshot_from=screenshot_from or None)
 
 
+@app.post("/api/sessions/{sid}/retry")
+def retry_failed(sid: str):
+    _require_id(sid, "session id")
+    return {"retried": _session_call(store.retry_failed, sid)}
+
+
 @app.delete("/api/sessions/{sid}/videos/{vid}")
 def remove_video(sid: str, vid: str):
     _require_id(sid, "session id")

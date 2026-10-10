@@ -91,6 +91,10 @@ Errors: **409** when the session is at the limit or not `open` (messages in `dat
 
 Effect: the video is persisted, then the runner is notified. If nothing else is in line, processing starts at once (US1 scenario 2).
 
+## `POST /api/sessions/{sid}/retry`
+
+Puts every `failed` video back to `waiting`, in its original order, and reopens an ended session (FR-025). Returns 200 `{"retried": n}`. Returns **409** `"There are no failed videos to retry."`, or `"This session is being joined. Try again when it finishes."`. When the session completes again, its join replaces `storage/archive/<sid>`: the old entry is parked as `.old-<sid>`, the new one is renamed into place, and then the parked one is deleted.
+
 ## `DELETE /api/sessions/{sid}/videos/{vid}`
 
 Removes a `waiting` video (FR-012). Returns 200 `{"removed": "<vid>"}`, or **409** `"Only a waiting video can be removed."`. It may complete the session (data-model, spec edge case).

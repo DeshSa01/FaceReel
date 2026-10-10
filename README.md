@@ -40,7 +40,13 @@ isn't found) is skipped, and the session's summary says why. Losing the
 connection to YouTube is different: the video goes back in line and the whole
 queue pauses, then retries after 30 s, 1 m, 2 m, and so on up to 10 m. It gives
 up after eight retries, about 45 minutes. The bar and the session page show
-the countdown, and sessions stay open while they wait. A waiting video
+the countdown, and sessions stay open while they wait.
+
+Videos that did fail can be retried together: **Retry failed videos** on the
+session page, or on the session's reel in the archive. That reopens the
+session, puts the failed videos back in the queue, and once they finish,
+joins the session again from all its clips. The new reel replaces the old one
+under the same session id. A waiting video
 can be removed before it starts. A session that never got a video can be
 discarded.
 
@@ -211,6 +217,11 @@ page and removes only that session's folder.
 leaves behind. They are never a complete reel (an entry only becomes visible
 when it is renamed into place), and leaving one would make the retried video
 fail.
+
+**A second automatic cleanup** belongs to retries. When a session's reel is
+replaced, the old one is briefly parked as `storage/archive/.old-<id>/`. If the
+app stops at that moment, the next startup puts the old reel back (if its
+replacement never landed) or deletes it (if it did).
 
 ## The archive
 

@@ -627,7 +627,12 @@ first use. With a single consumer, one-video-at-a-time holds by construction.
    matching `pipeline.is_network_error` are retried. Widen that list
    carefully: a misclassified permanent error costs ~45 minutes of a paused
    queue before it fails.
-5. **Read handlers return deep copies made under the lock.** The 002-era
+5. **Retry reopens an ended session** (`retry_failed`), and its re-join
+   *replaces* `archive/<sid>` via a parked `.old-<sid>`. Recovery only treats
+   an archived session reel as a join's result if it was created at or after
+   `completed_at`. Otherwise a restart mid re-join would adopt the old reel and
+   drop the retried videos.
+6. **Read handlers return deep copies made under the lock.** The 002-era
    "dictionary changed size during iteration" bug is the reason.
 
 ### Still open

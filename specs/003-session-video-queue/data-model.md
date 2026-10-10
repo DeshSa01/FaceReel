@@ -47,8 +47,8 @@ Every id received in a URL or form field is validated with `archive.valid_id` **
 - `joining` → `nothing_to_join`: no `done` video has a reel still in the archive (US2 scenario 4).
 - `joining` → `finished`: `archive.archive_session` succeeded.
 - `joining` → `join_failed`: ffmpeg or the archive step raised an error. Individual reels are untouched (FR-022).
-- Terminal states are never left. Videos can only be added in `open`.
-- **Restart** (research D3): `joining` stays `joining` and the join is retried, unless `storage/archive/<sid>` already exists, in which case it becomes `finished`.
+- Ended states are left only by a retry (FR-025): `finished` / `nothing_to_join` / `join_failed` → `open`, with failed videos → `waiting`, and `completed_at`, `result` and `error` cleared. Videos can only be added in `open`.
+- **Restart** (research D3): `joining` stays `joining` and the join is retried, unless `storage/archive/<sid>` holds a reel created **at or after** this `completed_at`, in which case it becomes `finished`. An older reel there is the one a retry is replacing, and must not be mistaken for the result.
 
 ## Video
 

@@ -79,6 +79,12 @@
     color: var(--text); text-decoration: none; display: inline-block;
   }
   a.dl { border-color: var(--accent); color: var(--accent); }
+  button.retry {
+    padding: 8px 14px; border-radius: 8px; font-size: 0.85rem; font-weight: 600;
+    cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  }
+  button.retry:disabled { opacity: 0.6; cursor: default; }
+  .m-retry-msg { font-size: 0.85rem; color: var(--error); margin-top: 8px; }
   button.delete { border-color: var(--error); color: var(--error); }
   button.delete:hover { background: var(--error); color: #fff; }
   .confirm {
@@ -112,7 +118,6 @@
   .m-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
   a.m-name { text-decoration: none; }
   a.m-name:hover { text-decoration: underline; }
-  .m-reason { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 1px; }
   .m-from { font-size: 0.85rem; margin-top: 10px; }
   .m-from a { color: var(--accent); }
 </style>
@@ -139,10 +144,12 @@
     <p class="m-from hidden" id="m-from"></p>
     <div class="m-videos hidden" id="m-videos"></div>
     <div class="modal-actions">
+      <button class="retry hidden" id="m-retry"></button>
       <a class="dl" id="m-download">Download</a>
       <button class="close" id="m-close">Close</button>
       <button class="delete" id="m-delete-btn">Delete reel</button>
     </div>
+    <p class="m-retry-msg hidden" id="m-retry-msg"></p>
     <div class="confirm hidden" id="m-confirm">
       <p id="m-confirm-text"></p>
       <div class="row">
@@ -261,13 +268,6 @@ function videoGroup(parent, heading, items, ok) {
     name.textContent = v.title || shortUrl(v.url);
     if (v.url) { name.href = v.url; name.target = "_blank"; name.rel = "noopener"; }
     body.appendChild(name);
-    if (!ok) {
-      const reason = document.createElement("span");
-      reason.className = "m-reason";
-      reason.textContent = v.state === "skipped" ? "Its reel was deleted before the join."
-        : (v.reason || "Failed.");
-      body.appendChild(reason);
-    }
     li.append(mark, body);
     ul.appendChild(li);
   }
@@ -290,6 +290,13 @@ function openModal(e) {
     videoGroup(vids, "Joined", all.filter(v => v.state === "joined"), true);
     videoGroup(vids, "Not included", all.filter(v => v.state !== "joined"), false);
   }
+  // Retrying reopens the session and rebuilds this reel once the retried
+  // videos finish; the session page is where that progress shows.
+  const failed = e.kind === "session" ? (e.videos || []).filter(v => v.state === "failed").length : 0;
+  $("m-retry").classList.toggle("hidden", !failed);
+  $("m-retry").disabled = false;
+  $("m-retry").textContent = `Retry ${failed} failed video${failed === 1 ? "" : "s"}`;
+  $("m-retry-msg").classList.add("hidden");
   from.innerHTML = "";
   from.classList.toggle("hidden", !e.session_id);
   if (e.session_id) {
@@ -299,7 +306,7 @@ function openModal(e) {
     from.appendChild(a);
   }
   if (e.available) {
-    $("m-player").src = `/api/archive/${e.id}/video`;
+    $("m-player").src = `/api/archive/${e.id}/video?v=${encodeURIComponent(e.created_at)}`;
     $("m-player").classList.remove("hidden");
     $("m-download").href = `/api/archive/${e.id}/video`;
     $("m-download").download = e.filename;
@@ -317,6 +324,15 @@ function closeModal() {
   $("m-player").removeAttribute("src");
   current = null;
 }
+$("m-retry").addEventListener("click", async () => {
+  const id = current.id;
+  $("m-retry").disabled = true;
+  const res = await fetch(`/api/sessions/${id}/retry`, { method: "POST" });
+  if (res.ok) { location.href = `/session/${id}`; return; }
+  $("m-retry-msg").textContent = (await res.json()).detail || "Could not retry.";
+  $("m-retry-msg").classList.remove("hidden");
+  $("m-retry").disabled = false;
+});
 $("m-close").addEventListener("click", closeModal);
 $("overlay").addEventListener("click", e => { if (e.target === $("overlay")) closeModal(); });
 

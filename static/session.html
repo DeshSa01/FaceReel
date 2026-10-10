@@ -103,6 +103,10 @@
     background: transparent; color: var(--muted); border: 1px solid var(--border);
   }
   .small-btn:hover:not(:disabled) { background: var(--bg); color: var(--text); }
+  button.secondary {
+    background: transparent; color: var(--accent); border: 1px solid var(--accent); margin-top: 12px;
+  }
+  button.secondary:hover:not(:disabled) { background: var(--bg); }
   .notice {
     border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px;
     font-size: 0.9rem; margin-bottom: 20px; background: var(--card);
@@ -154,6 +158,7 @@
     <p class="stats" id="ended-stats"></p>
     <a class="dl hidden" id="download">Download joined reel</a>
     <p class="error hidden" id="ended-error"></p>
+    <button type="button" class="secondary hidden" id="retry-ended"></button>
     <button type="button" id="new-session">Start a new session</button>
   </div>
 
@@ -249,6 +254,7 @@
     <h2>Queue</h2>
     <p class="status-msg hidden" id="empty-queue">No videos yet. Add the first one above &mdash;
       it starts processing straight away.</p>
+    <button type="button" class="small-btn hidden" id="retry-open"></button>
     <ul class="queue" id="queue"></ul>
     <button type="button" class="small-btn hidden" id="discard">Discard this empty session</button>
   </div>
@@ -429,6 +435,20 @@ $("discard").addEventListener("click", async () => {
   else showFormError((await res.json()).detail || "Could not discard the session.");
 });
 
+// Puts every failed video back in line; an ended session reopens and, once
+// they finish, joins again from all its clips into a replacement reel.
+async function retryFailed() {
+  $("form-error").classList.add("hidden");
+  const res = await fetch(`/api/sessions/${sid}/retry`, { method: "POST" });
+  if (!res.ok) {
+    $("ended-error").textContent = (await res.json()).detail || "Could not retry.";
+    $("ended-error").classList.remove("hidden");
+  }
+  await poll();
+}
+$("retry-ended").addEventListener("click", retryFailed);
+$("retry-open").addEventListener("click", retryFailed);
+
 async function removeVideo(vid) {
   const res = await fetch(`/api/sessions/${sid}/videos/${vid}`, { method: "DELETE" });
   if (!res.ok) showFormError((await res.json()).detail || "Could not remove the video.");
@@ -495,7 +515,9 @@ function renderEnded(s) {
     $("ended-title").textContent = "Your joined reel";
     if (!playerSrcSet) {
       playerSrcSet = true;
-      $("player").src = `/api/sessions/${sid}/output`;
+      // the query string changes when a retry rebuilds the reel, so the
+      // browser fetches the new file instead of replaying a cached one
+      $("player").src = `/api/sessions/${sid}/output?v=${encodeURIComponent(s.completed_at)}`;
       $("player").classList.remove("hidden");
       $("download").href = `/api/sessions/${sid}/output`;
       $("download").download = `facereel-session-${sid}.mp4`;
@@ -542,7 +564,22 @@ function render(s) {
     $("join-msg").textContent = j.message || "";
   }
   if (["finished", "nothing_to_join", "join_failed"].includes(s.state)) renderEnded(s);
-  else $("ended-card").classList.add("hidden");
+  else {
+    $("ended-card").classList.add("hidden");
+    if (playerSrcSet) {  // reopened by a retry: load the rebuilt reel when it lands
+      playerSrcSet = false;
+      $("player").pause();
+      $("player").removeAttribute("src");
+      $("player").classList.add("hidden");
+      $("download").classList.add("hidden");
+    }
+  }
+  const failedCount = s.videos.filter(v => v.state === "failed").length;
+  const retryLabel = `Retry ${failedCount} failed video${failedCount === 1 ? "" : "s"}`;
+  $("retry-ended").textContent = s.state === "finished" ? `${retryLabel} and rebuild the reel` : retryLabel;
+  $("retry-ended").classList.toggle("hidden", !failedCount);
+  $("retry-open").textContent = retryLabel;
+  $("retry-open").classList.toggle("hidden", !(failedCount && s.state === "open"));
 
   const atLimit = s.total >= s.limit;
   $("slots").textContent = atLimit

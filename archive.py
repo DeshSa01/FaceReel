@@ -23,6 +23,9 @@ SIDECAR_NAME = "reel.json"
 # Entries are assembled under this prefix and only revealed by an atomic
 # rename (research D3); the lister skips anything starting with a dot.
 TMP_PREFIX = ".tmp-"
+# A session reel being replaced by a re-join is parked here for the moment
+# between the two renames (see archive_session). Also dot-prefixed, so hidden.
+OLD_PREFIX = ".old-"
 
 _ID_RE = re.compile(r"^[0-9a-f]{12}$")
 
@@ -156,6 +159,7 @@ def archive_session(sid, joined_path, info):
     ensure_archive_dir()
     staging = os.path.join(ARCHIVE_DIR, TMP_PREFIX + sid)
     final = entry_dir(sid)
+    old = os.path.join(ARCHIVE_DIR, OLD_PREFIX + sid)
     try:
         os.makedirs(staging)
         video_dest = os.path.join(staging, "output.mp4")
@@ -182,11 +186,40 @@ def archive_session(sid, joined_path, info):
         }
         with open(os.path.join(staging, SIDECAR_NAME), "w") as f:
             json.dump(sidecar, f, indent=2)
+        # A retried session replaces its earlier reel. A directory can't be
+        # renamed over a non-empty one, so park the old entry, reveal the new,
+        # then delete the old. A crash between the renames leaves the old reel
+        # parked with no entry in its place; recover_parked() puts it back.
+        if os.path.isdir(final):
+            os.rename(final, old)
         os.rename(staging, final)
+        shutil.rmtree(old, ignore_errors=True)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
+        if os.path.isdir(old) and not os.path.exists(final):
+            os.rename(old, final)
         raise
     return final
+
+
+def recover_parked():
+    """Start-up repair for archive_session's replacement step. Restore a
+    parked old reel whose replacement never landed, and remove one whose
+    replacement did. Only names with a valid id are touched. Returns
+    (restored, removed)."""
+    ensure_archive_dir()
+    restored = removed = 0
+    for name in os.listdir(ARCHIVE_DIR):
+        if not name.startswith(OLD_PREFIX) or not valid_id(name[len(OLD_PREFIX):]):
+            continue
+        parked, final = os.path.join(ARCHIVE_DIR, name), entry_dir(name[len(OLD_PREFIX):])
+        if os.path.exists(final):
+            shutil.rmtree(parked, ignore_errors=True)
+            removed += 1
+        else:
+            os.rename(parked, final)
+            restored += 1
+    return restored, removed
 
 
 def list_entries():

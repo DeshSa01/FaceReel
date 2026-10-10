@@ -119,6 +119,14 @@ def _friendly_result(result):
                                  for v in result["videos"]]}
 
 
+def _not_before(a, b):
+    """a >= b for two ISO timestamps; False if either is missing or bad."""
+    try:
+        return datetime.fromisoformat(a) >= datetime.fromisoformat(b)
+    except (TypeError, ValueError):
+        return False
+
+
 class SessionStore:
     def __init__(self):
         self._lock = threading.Lock()
@@ -171,6 +179,8 @@ class SessionStore:
                     shutil.rmtree(os.path.join(archive.ARCHIVE_DIR, name), ignore_errors=True)
                     removed_tmp += 1
 
+        restored, parked_removed = archive.recover_parked()
+
         requeued = recovered = 0
         with self._lock:
             for s in self._sessions.values():
@@ -194,8 +204,12 @@ class SessionStore:
                         v["state"] = WAITING
                         requeued += 1
                     changed = True
-                if s["state"] == JOINING and archive.read_entry(s["id"]) is not None:
-                    entry = archive.read_entry(s["id"])
+                entry = archive.read_entry(s["id"]) if s["state"] == JOINING else None
+                # Only a reel made *after* this join began counts as its
+                # result. A retried session still has its earlier reel in the
+                # archive until the re-join replaces it, and taking that one
+                # would silently drop the retried videos.
+                if entry is not None and _not_before(entry.get("created_at"), s["completed_at"]):
                     s["state"] = FINISHED
                     s["result"] = self._result_from_entry(s, entry)
                     changed = True
@@ -204,7 +218,8 @@ class SessionStore:
                 if changed:
                     _write_session(s)
         print(f"Sessions: {len(self._sessions)} loaded, {requeued} video(s) re-queued, "
-              f"{recovered} recovered from the archive, {removed_tmp} stale staging folder(s) removed")
+              f"{recovered} recovered from the archive, {removed_tmp} stale staging folder(s) removed, "
+              f"{restored} replaced reel(s) restored, {parked_removed} parked reel(s) removed")
 
     # ---- ids ------------------------------------------------------------
 
@@ -309,6 +324,27 @@ class SessionStore:
             self.changed.notify_all()
             return {"id": vid, "index": self._display_index(s, video),
                     "line_position": self._line_position(video, sid)}
+
+    def retry_failed(self, sid):
+        """Put every failed video back in line and, if the session had ended,
+        reopen it. When the retried videos finish, the session completes and
+        joins again from all its clips, and the new reel replaces the old one
+        under the same session id (archive_session). Videos keep their seq,
+        so they stay in their original order."""
+        with self._lock:
+            s = self._get(sid)
+            if s["state"] == JOINING:
+                raise SessionError(409, "This session is being joined. Try again when it finishes.")
+            failed = [v for v in s["videos"] if v["state"] == FAILED]
+            if not failed:
+                raise SessionError(409, "There are no failed videos to retry.")
+            for v in failed:
+                v.update(state=WAITING, error=None, finished_at=None, network_retries=0)
+            if s["state"] in ENDED:
+                s.update(state=OPEN, completed_at=None, result=None, error=None)
+            _write_session(s)
+            self.changed.notify_all()
+            return len(failed)
 
     def remove_video(self, sid, vid):
         with self._lock:

@@ -58,6 +58,8 @@ A file that fails to parse is logged and skipped, never deleted.
 
 **A second window**: inside `archive_job`/`archive_session`, between `os.makedirs(staging)` and the final rename. A crash there leaves `archive/.tmp-<id>/`. Because `makedirs` has no `exist_ok`, the retried video would then fail with `FileExistsError`, and FR-020 forbids marking it failed for that. Recovery therefore removes every `archive/.tmp-<id>` whose `<id>` passes `valid_id`. That is the only case where a staging directory can be stale, since nothing else is in flight at start-up. It is an automatic deletion confined to `ARCHIVE_DIR`, so the README must document it (Principle V).
 
+**A retried session's re-join** (FR-025) adds two cases. (1) The archive still holds the session's *earlier* reel while the new join runs, so recovery only accepts a reel created at or after the session's `completed_at`. (2) `archive_session` replaces an existing entry by parking it as `.old-<sid>`, renaming the new one in, then deleting the parked one. At start-up, `recover_parked` restores a parked reel that has no entry, and deletes one whose replacement landed.
+
 **Restart-safe inputs**: The runner **copies** the video's screenshot from the session directory into the job's scratch directory before calling `process_job`. `archive_job` already *moves* the screenshot into the archive. Without the copy, it would move it out of the session store, and a crash after that would leave a waiting video with no screenshot. The copy also keeps the original available as a prefill source (D7). `archive.py` needs no change for this.
 
 ## D4. Completion is checked at every transition that can empty a queue
