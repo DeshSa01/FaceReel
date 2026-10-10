@@ -1,7 +1,9 @@
 """Video processing pipeline: download -> find person -> cut -> stitch."""
 
+import json
 import os
 import re
+from collections import Counter
 import subprocess
 import sys
 import time
@@ -613,5 +615,110 @@ def process_job(url, screenshot_path, job_dir, progress, tuning=None):
         "source_duration": round(duration, 1),
         "output_duration": round(sum(e - s for s, e in intervals), 1),
         "zoomed_clips": sum(1 for c in crops if c) if crops else 0,
+        "resolution": "x".join(str(v) for v in _video_size(output)),
+    }
+
+
+def _probe_reel(path):
+    """The stream parameters that decide whether reels can be concatenated
+    without re-encoding."""
+    result = _run(["ffprobe", "-v", "error",
+                   "-show_entries",
+                   "stream=codec_type,width,height,sample_aspect_ratio,avg_frame_rate,"
+                   "pix_fmt,sample_rate,channels:format=duration",
+                   "-of", "json", path])
+    data = json.loads(result.stdout)
+    streams = data.get("streams", [])
+    v = next((s for s in streams if s.get("codec_type") == "video"), None)
+    if v is None:
+        raise PipelineError(f"No video stream in {os.path.basename(path)}.")
+    a = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    sar = v.get("sample_aspect_ratio")
+    return {
+        "width": int(v["width"]), "height": int(v["height"]),
+        # ffprobe reports unset SAR as 0:1 or N/A; both mean square pixels
+        "sar": "1:1" if sar in (None, "0:1", "N/A") else sar,
+        "fps": v.get("avg_frame_rate") or "30/1",
+        "pix_fmt": v.get("pix_fmt"),
+        "audio": (a.get("sample_rate"), a.get("channels")) if a else None,
+        "duration": float(data.get("format", {}).get("duration") or 0),
+    }
+
+
+def _concat_copy(paths, list_path, output):
+    with open(list_path, "w") as f:
+        for p in paths:
+            # concat demuxer resolves relative paths against the list file, not cwd
+            f.write(f"file '{os.path.abspath(p)}'\n")
+    _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_path,
+          "-c", "copy", "-movflags", "+faststart", output])
+
+
+def join_reels(paths, work_dir, progress):
+    """Join finished reels, in order, into work_dir/joined.mp4 (research D5).
+
+    When every reel's streams match, the concat demuxer copies them through
+    in seconds. When anything differs (resolution, frame rate, SAR, audio),
+    stream copy is unsafe: the demuxer takes codec parameters from the first
+    file, and later reels of another size play as garbage or not at all.
+
+    In that case *every* reel is re-encoded to one canvas, not just the odd
+    ones out. Mixing copied and re-encoded H.264 relies on SPS/PPS matching
+    across files, and identical encoder settings don't guarantee that,
+    because x264 picks the level from resolution and frame rate.
+
+    The canvas is the most common (width, height, fps) among the reels, with
+    ties going to the larger area. It is the mode, not the maximum, so that a
+    single 4K reel in an otherwise 1080p session doesn't force all of them to
+    be upscaled and re-encoded at 4K on the N95.
+    MEASURED: <fill from tasks.md T037 -- join wall-clock on the nucbox for
+    a copy-path session, and for a mixed 1080p/4K session under the mode
+    and max canvas policies> (constitution Principle II).
+    """
+    os.makedirs(work_dir, exist_ok=True)
+    output = os.path.join(work_dir, "joined.mp4")
+    list_path = os.path.join(work_dir, "reels.txt")
+    n = len(paths)
+
+    progress("join", 2, f"Inspecting {n} reel(s)...")
+    probes = [_probe_reel(p) for p in paths]
+    keys = [(p["width"], p["height"], p["sar"], p["fps"], p["pix_fmt"], p["audio"]) for p in probes]
+
+    if len(set(keys)) == 1:
+        progress("join", 50, f"Joining {n} reel(s) -- all match, no re-encode needed...")
+        _concat_copy(paths, list_path, output)
+    else:
+        counts = Counter((p["width"], p["height"], p["fps"]) for p in probes)
+        (cw, ch, fps), _ = max(counts.items(), key=lambda kv: (kv[1], kv[0][0] * kv[0][1]))
+        vf = (f"scale={cw}:{ch}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
+              f"pad={cw}:{ch}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps}")
+        normalised = []
+        for i, (path, probe) in enumerate(zip(paths, probes)):
+            progress("join", 5 + 85 * i / n, f"Normalising reel {i + 1} of {n} to {cw}x{ch}...")
+            norm = os.path.join(work_dir, f"norm_{i:04d}.mp4")
+            cmd = ["ffmpeg", "-y", "-i", path]
+            if probe["audio"] is None:
+                # a reel with no audio track would leave a hole the concat
+                # demuxer can't bridge, so give it silence of the same length
+                cmd += ["-f", "lavfi", "-t", f"{probe['duration']:.3f}",
+                        "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
+            cmd += [
+                "-map", "0:v:0", "-map", "1:a:0" if probe["audio"] is None else "0:a:0",
+                "-vf", vf,
+                # same settings as cut_and_stitch, so a joined reel looks like
+                # its parts
+                "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-ac", "2", "-ar", "44100",
+                "-video_track_timescale", "90000",
+                norm,
+            ]
+            _run(cmd)
+            normalised.append(norm)
+        progress("join", 92, f"Joining {n} normalised reel(s)...")
+        _concat_copy(normalised, list_path, output)
+
+    return {
+        "output": output,
+        "output_duration": round(_probe_reel(output)["duration"], 1),
         "resolution": "x".join(str(v) for v in _video_size(output)),
     }

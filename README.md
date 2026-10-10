@@ -10,14 +10,41 @@ continuous playable video.
 .venv/bin/uvicorn app:app --host 127.0.0.1 --port 8765
 ```
 
-Then open http://127.0.0.1:8765, paste a YouTube link, and upload a clear
-screenshot of the person's face. One video is processed at a time; progress
-is shown in a bar pinned to the bottom of every page, including the archive,
-so there's no need to wait on the generator page for it to finish -- browse
-old reels, close the browser, or come back later, and the bar picks up
-wherever the reel actually is. It reports a finished or failed reel from
-whichever page you're on, and if the app was restarted while a reel was in
-flight, it says so instead of leaving a bar frozen partway.
+Then open http://127.0.0.1:8765. The first page lists the **sessions** that
+are running and offers to create a new one.
+
+A session is a queue of up to **10 videos**. Each video gets its own YouTube
+link, screenshot of the person, and settings. After the first one, the form
+keeps the previous video's screenshot and settings, so adding another video of
+the same person takes just a link. The first video starts processing as soon
+as it's added; later ones wait their turn. Every session, from every browser,
+shares one queue: the machine processes **one video at a time, in the order
+videos were added**.
+
+**A session finishes on its own once its queue is empty**, meaning nothing is
+waiting and nothing is processing. It then joins every successful video's reel,
+in order, into one video for the whole session. So **add the next video while
+the current one is still running**. The session page warns you while its last
+video is processing. A video added after a session has finished goes into a
+new session.
+
+The joined video is identified by the session id. It shows on the session page
+(`/session/<id>`), in the archive with a **Session** badge, and at
+`/api/sessions/<id>/output`. Each video's own reel is archived as well, so if
+the join fails, nothing is lost. A video that fails (for example, the person
+isn't found) is skipped, and the session's summary says why. A waiting video
+can be removed before it starts. A session that never got a video can be
+discarded.
+
+Sessions live on the server. Open the app from any browser or device, join a
+running session, and you'll see the same queue. Progress also shows in a bar
+pinned to the bottom of every page, naming the session and the video ("video 2
+of 5"). The bar announces when a session's joined reel is ready.
+
+**Sessions survive restarts and redeploys.** If the app restarts mid-session,
+the video that was processing starts over from the beginning (its partial
+progress is lost), and the waiting videos carry on in order. Nothing needs
+redoing by hand.
 
 ## Run with Docker
 
@@ -52,9 +79,10 @@ Either way, open `http://<host>:8765`.
 
 Notes:
 
-- **Run exactly one instance, one worker.** Job state lives in a module-level
-  dict in `app.py` and the one-at-a-time rule is enforced in-process, so
-  scaling out or adding `--workers` would break both.
+- **Run exactly one instance, one worker.** A single runner thread in the
+  process is the only consumer of the session queue, and the only writer of
+  each `session.json`. A second worker or replica would process two videos at
+  once and race on those files.
 - The storage path is bind-mounted, so job scratch is visible on the host —
   but it is still wiped on every startup, same as a local run. A healthy start
   logs `Cleared N orphaned job folder(s)`; a `PermissionError` there means the
@@ -155,9 +183,26 @@ downloaded source and proxy videos are deleted after processing.
 Reels download as `<first 5 letters of the video title>-<timestamp>.mp4`, e.g.
 `ricka-20260727-151225.mp4`, so repeated downloads don't overwrite each other.
 
-**`storage/jobs/` is wiped on every startup.** Job state is in-memory, so
-anything left on disk is orphaned once the server restarts — but by the time
-that happens the finished reel is no longer in there (see below).
+**`storage/jobs/` is scratch.** Each video's folder is deleted as soon as that
+video finishes or fails, and so is a session join's working folder
+(`storage/jobs/join-<id>/`). Anything still there at startup was interrupted,
+and is wiped. A finished reel never lives there; it's moved to the archive
+first (see below).
+
+## Sessions on disk
+
+`storage/sessions/<id>/` holds one session: `session.json` (the queue, each
+video's state and settings) and `screenshots/`. It is written on every state
+change and survives restarts. This is what lets a queue resume after a
+redeploy. Nothing deletes it automatically. The only way it is removed is
+discarding a session that never had a video, which is a button on the session
+page and removes only that session's folder.
+
+**One automatic deletion runs at startup:** half-written archive folders named
+`storage/archive/.tmp-<id>/`, which a crash in the middle of archiving a reel
+leaves behind. They are never a complete reel (an entry only becomes visible
+when it is renamed into place), and leaving one would make the retried video
+fail.
 
 ## The archive
 

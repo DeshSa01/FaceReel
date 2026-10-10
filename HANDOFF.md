@@ -6,11 +6,13 @@ how it works, why it works that way, and what's still open.
 Repo: https://github.com/DeshSa01/FaceReel (branch `main`, all work pushed)
 Local path: `/Users/sandesh/projects/video-stitcher` (directory name predates the rename)
 
-> **Starting a new session? Read §15 first.** The next piece of work is the reel
-> archive: fully specced, not yet built, with its tasks in
-> `specs/001-reel-archive/tasks.md`. §14 covers how the app is deployed and the
-> three environment gaps that bit during containerisation — worth reading before
-> changing anything that touches downloads or video decoding.
+> **Starting a new session? Read §15 first.** It covers sessions, the newest and
+> largest change to how work is run (`specs/003-session-video-queue/`). The
+> reel archive (`specs/001-reel-archive/`) and persistent progress
+> (`specs/002-persistent-job-progress/`) are built. §14 covers how the app is
+> deployed and the three environment gaps that bit during containerisation —
+> worth reading before changing anything that touches downloads or video
+> decoding.
 
 ---
 
@@ -20,7 +22,10 @@ Web app. User submits a **YouTube URL** + a **screenshot of a person's face**
 from that video. The app finds every moment that person appears and stitches
 those segments into one continuous video, played back in the browser.
 
-One video is processed at a time (a second submission gets HTTP 409).
+Work is organised into **sessions** (§15): each one queues up to 10 videos and,
+once its queue empties, joins their reels into one video named by the session
+id. One video is processed at a time across the whole app; later submissions
+wait in a shared queue rather than being refused.
 
 Form options: three clip-boundary sliders with a "Use recommended" preset
 (§11), plus **Zoom in on the subject** and **Download the source in 4K** (§12).
@@ -52,11 +57,19 @@ Models came from the [OpenCV model zoo](https://github.com/opencv/opencv_zoo)
 
 - `pipeline.py` — all processing. Pure functions + `process_job()` orchestrator.
   Raises `PipelineError` for anything the user should see.
-- `app.py` — FastAPI: `POST /api/jobs`, `GET /api/jobs/{id}`,
-  `GET /api/jobs/{id}/output`, `GET /`. Jobs run on a background thread; state
-  is an in-memory dict (lost on restart — deliberate, single-user local tool).
-- `static/index.html` — form, live progress bar, `<video>` player, download link.
-  Light/dark themed.
+- `app.py` — FastAPI routes only: sessions (`/api/sessions…`), the progress bar's
+  `GET /api/jobs/active`, archive, pages. `lifespan` cleans `storage/jobs/`, loads
+  and recovers sessions, then starts the runner. The old `POST /api/jobs` /
+  `GET /api/jobs/{id}` single-job API is **gone** (§15).
+- `sessions.py` — the durable session store (`storage/sessions/`): state machine,
+  10-video limit, auto-completion, restart recovery, snapshots for the API.
+- `runner.py` — the single consumer thread: joins first, then the oldest waiting
+  video across all sessions.
+- `archive.py` — `storage/archive/`: one directory per reel, single-video
+  (`kind: video`) or a session's joined reel (`kind: session`, keyed by session id).
+- `static/index.html` — the session chooser. `static/session.html` — the
+  generator form, the queue, and the joined reel. `static/archive.html` — the
+  archive. `static/progress.js` — the bottom bar on every page. Light/dark themed.
 - `models/` — the two ONNX files.
 - `Dockerfile`, `.dockerignore`, `docker-compose.yml`,
   `.github/workflows/docker.yml` — the container and its CI (§14).
@@ -65,11 +78,10 @@ Models came from the [OpenCV model zoo](https://github.com/opencv/opencv_zoo)
   so bumping yt-dlp rebuilds in seconds (§14).
 - `.specify/` — spec-kit scripts, templates, and the project constitution.
   `specs/<NNN>-<name>/` — per-feature spec / plan / tasks (§15).
-- `archive.py` — **does not exist yet**; the next feature creates it (§15).
-- `storage/jobs/<job_id>/` — per-job scratch: screenshot, source video, proxy,
-  segments, `output.mp4`. Source + proxy are deleted on success; `output.mp4`
-  stays for the life of the process (it's what gets served) but is **wiped at
-  the next startup** by `clean_jobs_dir()` (§13). Gitignored.
+- `storage/jobs/<video_id>/`, `storage/jobs/join-<session_id>/` — scratch,
+  deleted when the video or join finishes, and anything left over is wiped at
+  startup by `clean_jobs_dir()` (§13). `storage/sessions/` and `storage/archive/`
+  are durable. All three are gitignored.
 
 ## 4. Pipeline stages
 
@@ -204,15 +216,13 @@ sliders** (see §11); the constants above are just their defaults.
   (a 134s reel came out ~103 MB, ~6 Mbps).
 - **Above 720p YouTube serves VP9/AV1**, so the source download may be webm.
   Harmless — ffmpeg decodes it and segments are re-encoded to H.264.
-- **Jobs are in-memory**: restarting uvicorn loses job history. Since anything
-  left on disk is therefore orphaned, `clean_jobs_dir()` now **deletes every
-  job folder at startup** (see §13) — `output.mp4` files no longer survive a
-  restart. Since the persistent-job-progress feature, this has a user-visible
-  side effect: a reel in flight during a restart is not silently lost from
-  view — `facereel.watching` (client-side, `static/progress.js`) notices the
-  reel is gone from `GET /api/jobs/active` and reports it as not finished,
-  rather than leaving the bottom bar frozen at its last percentage or making
-  it vanish as if the reel had completed.
+- **Sessions are durable; a video's progress is not.** Session queues are on
+  disk and resume after a restart, but per-tick progress lives in memory only. A
+  video interrupted by a restart starts over from 0%, and the bar visibly
+  drops back. That's deliberate (`specs/003-session-video-queue/research.md`
+  D1, D9). The 002-era `facereel.watching` "reel did not finish" notice was
+  removed: in a queue, the active id changes at every hand-off, so it would
+  have fired after every successful video.
 - **yt-dlp 403s intermittently** on YouTube. `_ydl()` retries once after 3s,
   which clears essentially all of it. Must invoke the venv's yt-dlp via
   `sys.executable -m yt_dlp`, not the Homebrew binary.
@@ -336,8 +346,9 @@ arbitrary values, so no server change was needed.
 
 `Tuning.clamped()` holds untrusted form values in range — `app.py` passes the
 raw floats straight from the multipart form, so don't bypass it. The chosen
-values are stored on the job dict and echoed by `GET /api/jobs/{id}`, which is
-what lets the UI print them under the result stats; useful when comparing runs.
+values are stored on each queued video in `session.json` and echoed by
+`GET /api/sessions/{id}` and the archive sidecar, which is what lets the UI show
+them; useful when comparing runs.
 
 Front end is a `<details open>` panel above the submit button, plus a reset
 button. The `knobs` object in `static/index.html` duplicates the three defaults
@@ -459,8 +470,8 @@ on the `FileResponse` alone does nothing — `static/index.html` assigns
 `$("download").download = r.filename` on completion, with a `facereel.mp4`
 fallback for a stale page talking to a newer server.
 
-Collisions need two jobs to finish in the same second, which the 409 single-job
-lock makes impossible in practice. Add the job id to the slug if that ever
+Collisions need two jobs to finish in the same second, which the single runner
+thread (§15) makes impossible in practice. Add the job id to the slug if that ever
 stops being true.
 
 ### Startup cleanup
@@ -471,9 +482,9 @@ a **FastAPI `lifespan` handler, deliberately not module scope** — importing
 way. It only removes directories, leaves loose files alone, is idempotent, and
 creates the folder if it is missing.
 
-This is destructive by design: it makes disk state match the in-memory job dict,
-which is empty at startup. Anyone who wants a reel to survive must download it
-before restarting.
+This is destructive by design and safe: `storage/jobs/` only ever holds scratch.
+Finished reels are moved to `storage/archive/` and session queues live in
+`storage/sessions/` (§15), and neither is touched.
 
 ---
 
@@ -544,8 +555,9 @@ pushed before assuming it failed.
 
 ### 14b. Deliberate constraints
 
-- **One instance, one worker.** Job state is a module-level dict and the
-  one-at-a-time rule is in-process. No `--workers`, no replicas.
+- **One instance, one worker.** One runner thread is the only consumer of the
+  session queue and the only writer of each `session.json`. No `--workers`, no
+  replicas.
 - **`opencv-python-headless`** in the image (same `cv2` API, no GUI stack, so no
   `libGL`). The dev venv still has plain `opencv-python`.
 - **`HOME=/home/app`** is set explicitly — Docker does not reliably derive it
@@ -566,62 +578,60 @@ it would cost the pinned image, CI and rollback, and Debian trixie ships Python
 
 ---
 
-## 15. Next up: the reel archive (specced 2026-09-05, NOT built)
+## 15. Sessions and the shared queue (built 2026-10-10)
 
-**Everything needed to start implementing is in `specs/001-reel-archive/`.**
-Read `spec.md` then `plan.md`, and work `tasks.md` in order.
+Spec, plan, research (D1–D12), data model, contract and quickstart are in
+`specs/003-session-video-queue/`. The reel archive (`specs/001-…`) and persistent
+progress (`specs/002-…`) were built before this and are still in place.
 
-### The problem
+### What changed
 
-A finished reel lives in `storage/jobs/<id>/output.mp4` and the job record exists
-only in memory, so `clean_jobs_dir()` destroys every past reel at startup (§13).
-That was a fair trade for a hand-started local tool. It is data loss now that the
-app runs continuously and restarts on every redeploy.
+The old model was one thread per job and a 409 if one was already running. Now
+every submission is accepted into a durable queue, and **one long-lived runner
+thread** (`runner.py`) decides what runs next. It runs any pending session join
+first, then the waiting video with the lowest global `seq` across *all*
+sessions. With a single consumer, "one video at a time, in the order added"
+holds by construction.
 
-### The design in one paragraph
+- A session completes **automatically** when it has at least one video and none
+  is waiting or processing. There is no "finish" button; that was the user's
+  choice in clarification. The session page warns while the last video is
+  processing.
+- Each video has its own link, screenshot and tuning, prefilled from the
+  previous video *server-side* (`screenshot_from=<vid>`). The prefill has to be
+  server-side because a browser cannot set a file input, and the session may
+  have been joined from another device.
+- The joined reel is an archive entry keyed by the **session id** (`kind:
+  session`), built by `pipeline.join_reels`. That's a stream copy when every
+  reel's streams match. Otherwise **all** reels are re-encoded to the most
+  common size and frame rate, because mixing copied and re-encoded H.264 risks
+  SPS/level mismatches.
 
-A sibling `storage/archive/` that the startup wipe never touches, holding one
-self-contained directory per reel — `output.mp4`, `thumb.jpg`, the reference
-screenshot, and a `reel.json` sidecar. A new `archive.py` owns it; `app.py` gains
-list/media/delete endpoints and serves `static/archive.html`. `pipeline.py` is
-untouched.
+### Things that will bite if changed carelessly
 
-### Decisions already settled with the user — do not relitigate
+1. **The runner copies the screenshot into the job dir.** `archive_job` *moves*
+   its screenshot, and handing it the session's own copy would strip it from
+   `storage/sessions/`, breaking both restart and prefill.
+2. **Recovery (`SessionStore.recover`) has two crash windows to handle.** If
+   the archive rename landed but the session write didn't, the video is marked
+   `done` from the archive rather than re-run. If a stale `archive/.tmp-<id>`
+   was left behind, it's removed before anything is retried. Both have been
+   tested by forging the on-disk state (see the quickstart).
+3. **Read handlers return deep copies made under the lock.** The 002-era
+   "dictionary changed size during iteration" bug is the reason.
 
-- **Retention is unlimited.** Nothing is ever auto-deleted. Total archive size is
-  displayed instead, as the agreed compensating control.
-- **Thumbnail grid**, using a poster frame from the reel (not the uploaded face
-  image) — a title alone does not say *which person* a reel is of.
-- **Stored per reel**: the stats `process_job()` already returns, the five tuning
-  values, the source URL, the reference screenshot, and a creation timestamp.
-- **Deletion is permanent.** No recycle bin, no undo; confirmation is the only
-  safeguard.
-- **No migration.** Existing reels in job directories are lost at the next
-  restart, exactly as they would be today.
+### Still open
 
-### Two things to get right, or the feature is worse than not having it
-
-1. **Validate the id before building any path.** `^[0-9a-f]{12}$`, in
-   `archive.py` so no endpoint can skip it. Every archive endpoint builds a
-   filesystem path from a URL segment and one of them calls `shutil.rmtree`.
-   `quickstart.md` step 5 tests traversal — **run it before trusting the delete
-   endpoint**.
-2. **Assemble entries in `.tmp-<id>/` and `os.rename` into place.** A rename is
-   atomic, so a half-written entry is never visible. Without it an interrupted
-   archive leaves an entry that lists but will not play — discovered only later,
-   when the reel is already unrecoverable. Write `reel.json` last.
-
-### Sequence
-
-`tasks.md` has 33 tasks in six phases. **US1 alone (T007–T013) is the MVP** — it
-ends the data loss with no UI at all, and is worth landing and verifying on its
-own. US2 (browse/play) then US3 (delete) follow, in that order because a
-destructive endpoint should not exist before there is a tested listing to confirm
-it acts on the right entry.
-
-Verification is `quickstart.md`. The step that actually matters is the
-**container redeploy test** (its step 6), not just a local restart — redeploy is
-what happens on every new image.
+- **T037**: measure join time on the nucbox (copy path; mixed 1080p/4K under
+  mode vs max canvas) and replace the `MEASURED:` placeholder in
+  `pipeline.join_reels`. Constitution Principle II says the canvas policy
+  isn't justified until this is done.
+- **T041**: container verification (quickstart steps 12–13): a redeploy
+  mid-session, and a mixed join decoded with the container's ffmpeg.
+- Verified so far: on macOS, with a stub pipeline that renders synthetic
+  reels. That covered ordering, limits, removal, restart and both crash
+  windows, copy and mixed joins (decoded clean), plus the pages in Chrome. A
+  run with real YouTube videos has not been done yet.
 
 ### Working with spec-kit
 
@@ -648,4 +658,4 @@ an excluded *directory*, so the current single-line pattern will not work).
 derived from conventions already in this repo, each citing its evidence. It
 deliberately does **not** mandate test-first: there is no test suite, and an
 unmet gate is just something to route around. Plans carry a Constitution Check;
-`specs/001-reel-archive/plan.md` passes all five.
+Every feature plan so far (`specs/001…003/plan.md`) passes all five.

@@ -76,21 +76,22 @@
   const STAGE_NAMES = {
     start: "Starting", reference: "Reading screenshot", download: "Downloading video",
     scan: "Scanning for the person", refine: "Refining clip boundaries",
-    track: "Measuring framing", stitch: "Cutting & stitching", done: "Done",
+    track: "Measuring framing", stitch: "Cutting & stitching", join: "Joining reels",
+    done: "Done",
   };
 
-  const WATCH_KEY = "facereel.watching";
+  // Holds a *session* id now: the terminal notice is per session, not per
+  // video, so ten videos finishing don't raise ten notices (research D9).
+  //
+  // There is deliberately no "watching" key any more. 002 kept the id of the
+  // reel on display so it could report one that vanished in a restart. With
+  // a queue, the active id changes at every normal hand-off between videos,
+  // so that check would fire after every success; and a restart now
+  // re-queues the video instead of losing it (FR-020), so there is nothing
+  // left for it to detect. A resumed video restarting at 0% is the truthful
+  // picture, not a regression (plan "Three things" #3).
   const ACK_KEY = "facereel.acknowledged";
 
-  function getWatching() {
-    try { return localStorage.getItem(WATCH_KEY); } catch { return null; }
-  }
-  function setWatching(id) {
-    try {
-      if (id) localStorage.setItem(WATCH_KEY, id);
-      else localStorage.removeItem(WATCH_KEY);
-    } catch { /* localStorage unavailable -- display state, safe to lose */ }
-  }
   function getAcknowledged() {
     try { return localStorage.getItem(ACK_KEY); } catch { return null; }
   }
@@ -118,26 +119,28 @@
     bar.classList.remove("fp-stale");
   }
 
+  function sessionLink(sid, text) {
+    const link = document.createElement("a");
+    link.className = "fp-link"; link.href = `/session/${sid}`; link.textContent = text;
+    return link;
+  }
+
+  // FR-016: name the session and the video within it, e.g.
+  // "Session 4f2a91… · video 2 of 5 · Scanning for the person".
   function renderProcessing(job) {
     bar.classList.remove("fp-error");
     trackEl.style.display = "";
-    stageEl.textContent = STAGE_NAMES[job.stage] || "Working";
+    const where = `Session ${job.session_id.slice(0, 6)}… · ` +
+      (job.kind === "join" ? "joining reels" : `video ${job.index} of ${job.total} · ` +
+        (STAGE_NAMES[job.stage] || "Working"));
+    stageEl.textContent = where;
     msgEl.textContent = job.message || "";
     fillEl.style.width = (job.progress || 0) + "%";
     actionsEl.innerHTML = "";
-    showBar();
-  }
-
-  function renderInterrupted() {
-    bar.classList.remove("fp-error", "fp-stale");
-    trackEl.style.display = "none";
-    stageEl.textContent = "Reel did not finish";
-    msgEl.textContent = "The application restarted before this reel completed.";
-    actionsEl.innerHTML = "";
-    const dismiss = document.createElement("button");
-    dismiss.type = "button"; dismiss.className = "fp-dismiss"; dismiss.textContent = "Dismiss";
-    dismiss.addEventListener("click", hideBar);
-    actionsEl.appendChild(dismiss);
+    // no link from the session's own page -- it's already showing this
+    if (!location.pathname.endsWith(`/session/${job.session_id}`)) {
+      actionsEl.appendChild(sessionLink(job.session_id, "Open session"));
+    }
     showBar();
   }
 
@@ -151,12 +154,10 @@
   function renderCompleted(job) {
     bar.classList.remove("fp-error", "fp-stale");
     trackEl.style.display = "none";
-    stageEl.textContent = "Reel finished";
+    stageEl.textContent = job.state === "finished" ? "Session reel ready" : "Session finished — nothing to join";
     msgEl.textContent = job.message || "Done!";
     actionsEl.innerHTML = "";
-    const link = document.createElement("a");
-    link.className = "fp-link"; link.href = `/archive#${job.id}`; link.textContent = "View reel";
-    actionsEl.appendChild(link);
+    actionsEl.appendChild(sessionLink(job.session_id, "View session"));
     actionsEl.appendChild(dismissButton(() => { setAcknowledged(job.id); hideBar(); }));
     showBar();
   }
@@ -165,29 +166,27 @@
     bar.classList.add("fp-error");
     bar.classList.remove("fp-stale");
     trackEl.style.display = "none";
-    stageEl.textContent = "Reel failed";
+    stageEl.textContent = "Session reel failed";
     msgEl.textContent = job.message || "Something went wrong.";
     actionsEl.innerHTML = "";
+    actionsEl.appendChild(sessionLink(job.session_id, "View session"));
     actionsEl.appendChild(dismissButton(() => { setAcknowledged(job.id); hideBar(); }));
     showBar();
   }
 
   function render(job) {
     if (!job) {
-      setWatching(null);
       hideBar();
       return;
     }
     if (job.status === "processing") {
-      setWatching(job.id);
       renderProcessing(job);
       return;
     }
-    // Terminal (done/error). /api/jobs/active keeps returning this record
-    // until a new job replaces it, so acknowledgement is what stops the
-    // notice from reappearing on every subsequent poll and reload (research
+    // Terminal: the most recently ended session. /api/jobs/active keeps
+    // returning it until another session ends, so acknowledgement is what
+    // stops the notice reappearing on every poll and reload (002 research
     // D5; FR-010).
-    setWatching(null);
     if (getAcknowledged() === job.id) {
       hideBar();
       return;
@@ -198,18 +197,6 @@
 
   function handleResponse(job) {
     clearStale();
-    const watching = getWatching();
-    if (watching && (!job || job.id !== watching)) {
-      // The reel this browser was displaying as processing is no longer in
-      // the server's answer at all -- the only way a restart-interrupted
-      // reel is detectable, since the record itself died with the process
-      // (research D4). A job that merely finished keeps the same id, so
-      // this never fires for a normal completion.
-      setWatching(null);
-      renderInterrupted();
-      notify(null);
-      return;
-    }
     render(job);
     notify(job);
   }
@@ -253,7 +240,9 @@
     if (document.hidden) stopPolling();
     else startPolling();
   });
-  if (!document.hidden) startPolling();
+  // One fetch regardless, so a page opened in a background tab already shows
+  // the bar when the user switches to it.
+  if (document.hidden) poll(); else startPolling();
 
   window.FaceReelProgress = { subscribe };
 })();

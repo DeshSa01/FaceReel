@@ -2,8 +2,6 @@
 
 import os
 import shutil
-import threading
-import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 
@@ -12,6 +10,8 @@ from fastapi.responses import FileResponse
 
 import archive
 import pipeline
+import sessions
+from runner import Runner
 
 BASE_DIR = os.path.dirname(__file__)
 JOBS_DIR = os.path.join(BASE_DIR, "storage", "jobs")
@@ -30,6 +30,12 @@ def clean_jobs_dir(path=JOBS_DIR):
     return removed
 
 
+# Module scope, but inert: constructing these touches no disk and starts no
+# thread. Everything with side effects happens in lifespan().
+store = sessions.SessionStore()
+runner = Runner(store, JOBS_DIR)
+
+
 @asynccontextmanager
 async def lifespan(_app):
     # deliberately not at module scope: importing this module must not delete
@@ -37,118 +43,113 @@ async def lifespan(_app):
     removed = clean_jobs_dir()
     print(f"Cleared {removed} orphaned job folder(s) from {JOBS_DIR}")
     archive.ensure_archive_dir()
+    sessions.ensure_sessions_dir()
+    store.load()
+    # Order matters: recovery reconciles interrupted work against the archive
+    # (research D3) and must finish before the runner can pick anything.
+    store.recover()
+    runner.start()
     yield
 
 
 app = FastAPI(title="FaceReel", lifespan=lifespan)
 
-jobs = {}
-jobs_lock = threading.Lock()
+
+def _require_id(value, what="id"):
+    # A malformed id is 400, never 404, so a traversal attempt is
+    # distinguishable in the logs from a genuine miss (001 research D5). Runs
+    # before any path is built from the value (FR-023, Principle V).
+    if not archive.valid_id(value):
+        raise HTTPException(400, f"Malformed {what}.")
 
 
-def _worker(job_id, url, screenshot_path, job_dir, tuning):
-    job = jobs[job_id]
-
-    def progress(stage, pct, message):
-        job.update(stage=stage, progress=round(min(pct, 99), 1), message=message)
-
+def _session_call(fn, *args, **kwargs):
     try:
-        result = pipeline.process_job(url, screenshot_path, job_dir, progress, tuning)
-    except pipeline.PipelineError as e:
-        job.update(status="error", message=str(e))
-        return
-    except Exception as e:
-        job.update(status="error", message=f"Unexpected error: {e}")
-        return
-
-    try:
-        entry_path = archive.archive_job(job_id, url, result, tuning, screenshot_path)
-    except Exception as e:
-        # The reel generated correctly but did not persist -- report failure
-        # rather than success, since the atomic rename guarantees there is no
-        # half-saved reel to explain (research D8).
-        job.update(status="error", message=f"Reel was generated but could not be saved: {e}")
-        return
-
-    # Repoint at the archived file so /api/jobs/{id}/output keeps serving the
-    # result card unchanged (FR-027, research D4) -- the job dir it came from
-    # is wiped at the next restart.
-    job.update(status="done", stage="done", progress=100,
-               message="Done!", result={k: v for k, v in result.items() if k != "output"},
-               output_path=os.path.join(entry_path, "output.mp4"))
+        return fn(*args, **kwargs)
+    except sessions.SessionError as e:
+        raise HTTPException(e.status, e.message)
 
 
-@app.post("/api/jobs")
-async def create_job(
+@app.get("/api/jobs/active")
+def get_active_job():
+    # What the shared progress bar polls. Before sessions this sat above
+    # GET /api/jobs/{job_id} for route-order reasons; that route is gone
+    # along with the rest of the single-job API, because a second way to
+    # start work would bypass the line (research D10).
+    return {"job": store.active()}
+
+
+@app.get("/api/sessions")
+def list_sessions():
+    return {"sessions": store.list_open()}
+
+
+@app.post("/api/sessions", status_code=201)
+def create_session():
+    return {"id": store.create_session()}
+
+
+@app.get("/api/sessions/{sid}")
+def get_session(sid: str):
+    _require_id(sid, "session id")
+    return _session_call(store.snapshot, sid)
+
+
+@app.delete("/api/sessions/{sid}")
+def discard_session(sid: str):
+    _require_id(sid, "session id")
+    _session_call(store.discard_session, sid)
+    return {"deleted": sid}
+
+
+@app.post("/api/sessions/{sid}/videos", status_code=201)
+async def add_video(
+    sid: str,
     url: str = Form(...),
-    screenshot: UploadFile = File(...),
+    screenshot: UploadFile | None = File(None),
+    screenshot_from: str | None = Form(None),
     lead_in: float | None = Form(None),
     boundary_reach: float | None = Form(None),
     clip_gap: float | None = Form(None),
     zoom: bool = Form(False),
     hi_res: bool = Form(False),
 ):
+    _require_id(sid, "session id")
     tuning = pipeline.Tuning.clamped(lead_in, boundary_reach, clip_gap, zoom, hi_res)
-    with jobs_lock:
-        if any(j["status"] == "processing" for j in jobs.values()):
-            raise HTTPException(409, "A video is already being processed. Try again when it finishes.")
-        job_id = uuid.uuid4().hex[:12]
-        jobs[job_id] = {
-            "id": job_id, "status": "processing", "stage": "start",
-            "progress": 0, "message": "Starting...", "result": None,
-            # echoed back on poll so a run can be tied to the values that made it
-            "tuning": asdict(tuning),
-            # seeded (never read) so _worker's later update() only ever replaces
-            # a value instead of adding a key -- get_job iterates job.items(),
-            # and a dict that gains a key mid-iteration raises RuntimeError:
-            # dictionary changed size during iteration (research D6)
-            "output_path": None,
-        }
-
-    job_dir = os.path.join(JOBS_DIR, job_id)
-    os.makedirs(job_dir, exist_ok=True)
-    screenshot_path = os.path.join(job_dir, "screenshot" + os.path.splitext(screenshot.filename or "")[1])
-    with open(screenshot_path, "wb") as f:
-        shutil.copyfileobj(screenshot.file, f)
-
-    threading.Thread(target=_worker,
-                     args=(job_id, url, screenshot_path, job_dir, tuning),
-                     daemon=True).start()
-    return {"id": job_id}
+    # a file input left empty can still arrive as a nameless part
+    upload = (screenshot.filename, screenshot.file) if screenshot and screenshot.filename else None
+    return _session_call(store.add_video, sid, url.strip(), asdict(tuning),
+                         upload=upload, screenshot_from=screenshot_from or None)
 
 
-@app.get("/api/jobs/active")
-def get_active_job():
-    # MUST stay declared above GET /api/jobs/{job_id}: FastAPI matches routes
-    # in declaration order, so below it "active" would be captured as a
-    # job_id and this endpoint would 404 forever -- a silent failure where
-    # the indicator simply never appears. Job ids are ^[0-9a-f]{12}$, so
-    # "active" can never collide with a real one; only the ordering matters.
-    with jobs_lock:
-        job = next((j for j in jobs.values() if j["status"] == "processing"), None)
-        if job is None and jobs:
-            job = next(reversed(jobs.values()))
-    if job is None:
-        return {"job": None}
-    return {"job": {k: v for k, v in job.items() if k != "output_path"}}
+@app.delete("/api/sessions/{sid}/videos/{vid}")
+def remove_video(sid: str, vid: str):
+    _require_id(sid, "session id")
+    _require_id(vid, "video id")
+    _session_call(store.remove_video, sid, vid)
+    return {"removed": vid}
 
 
-@app.get("/api/jobs/{job_id}")
-def get_job(job_id: str):
-    job = jobs.get(job_id)
-    if not job:
-        raise HTTPException(404, "Job not found.")
-    return {k: v for k, v in job.items() if k != "output_path"}
+@app.get("/api/sessions/{sid}/videos/{vid}/screenshot")
+def get_video_screenshot(sid: str, vid: str):
+    _require_id(sid, "session id")
+    _require_id(vid, "video id")
+    return FileResponse(_session_call(store.screenshot_path, sid, vid))
 
 
-@app.get("/api/jobs/{job_id}/output")
-def get_output(job_id: str):
-    job = jobs.get(job_id)
-    if not job or job["status"] != "done":
-        raise HTTPException(404, "Output not available.")
-    name = (job.get("result") or {}).get("filename") or "facereel.mp4"
-    return FileResponse(job["output_path"], media_type="video/mp4",
-                        filename=name, content_disposition_type="inline")
+@app.get("/api/sessions/{sid}/output")
+def get_session_output(sid: str):
+    _require_id(sid, "session id")
+    session = _session_call(store.snapshot, sid)
+    entry = archive.read_entry(sid)
+    # both checks: the user may have deleted the joined reel from the archive
+    if session["state"] != sessions.FINISHED or entry is None:
+        raise HTTPException(404, "No joined reel for this session.")
+    path = os.path.join(archive.entry_dir(sid), entry["video"])
+    if not os.path.exists(path):
+        raise HTTPException(404, "No joined reel for this session.")
+    return FileResponse(path, media_type="video/mp4",
+                        filename=entry["filename"], content_disposition_type="inline")
 
 
 @app.get("/")
@@ -156,6 +157,15 @@ def index():
     # FileResponse sends no Cache-Control, so browsers heuristically cache the
     # page and keep serving a stale copy across restarts; force revalidation
     return FileResponse(os.path.join(BASE_DIR, "static", "index.html"),
+                        headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/session/{sid}")
+def session_page(sid: str):
+    # Validated but not looked up: an unknown session still gets the page,
+    # which renders "Session not found" from the API (contract "Pages").
+    _require_id(sid, "session id")
+    return FileResponse(os.path.join(BASE_DIR, "static", "session.html"),
                         headers={"Cache-Control": "no-cache"})
 
 
@@ -170,13 +180,10 @@ def progress_js():
 
 
 def _require_valid_id(reel_id):
-    # A malformed id is 400, never 404, so a traversal attempt is
-    # distinguishable in the logs from a genuine miss (research D5). The
-    # routes below capture reel_id with the :path converter specifically so
-    # that an encoded "/" still reaches this check instead of being 404'd by
-    # the router before validation ever runs.
-    if not archive.valid_id(reel_id):
-        raise HTTPException(400, "Malformed reel id.")
+    # The archive routes below capture reel_id with the :path converter
+    # specifically so that an encoded "/" still reaches this check instead of
+    # being 404'd by the router before validation ever runs.
+    _require_id(reel_id, "reel id")
 
 
 @app.get("/archive")

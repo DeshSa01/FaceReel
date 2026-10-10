@@ -88,11 +88,21 @@
   .confirm p { margin-bottom: 10px; color: var(--text); }
   .confirm .row { display: flex; gap: 10px; }
   .hidden { display: none; }
+  .session-badge {
+    display: inline-block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em;
+    color: #fff; background: var(--accent); border-radius: 4px; padding: 1px 6px;
+    margin-right: 6px; vertical-align: 1px;
+  }
+  .m-videos { list-style: none; padding: 0; margin-top: 10px; font-size: 0.85rem; }
+  .m-videos li { padding: 4px 0; color: var(--muted); }
+  .m-videos li.joined { color: var(--text); }
+  .m-from { font-size: 0.85rem; margin-top: 8px; }
+  .m-from a { color: var(--accent); }
 </style>
 </head>
 <body>
 <main>
-  <a class="back" href="/">&larr; Back to generator</a>
+  <a class="back" href="/">&larr; Sessions</a>
   <h1>Archive</h1>
   <p class="sub">Every reel that has finished generating, kept until you delete it.</p>
 
@@ -108,6 +118,8 @@
   <div class="modal">
     <h2 id="m-title"></h2>
     <p class="reel-meta" id="m-meta"></p>
+    <p class="m-from hidden" id="m-from"></p>
+    <ul class="m-videos hidden" id="m-videos"></ul>
     <video id="m-player" controls playsinline></video>
     <div class="modal-actions">
       <a class="dl" id="m-download">Download</a>
@@ -144,6 +156,10 @@ function fmtDate(iso) {
   });
 }
 function metaLine(e) {
+  if (e.kind === "session") {
+    const joined = (e.videos || []).filter(v => v.state === "joined").length;
+    return `${joined} video(s) joined · ${e.clip_count} clip(s) · ${e.output_duration}s · ${e.resolution}`;
+  }
   const t = e.tuning || {};
   return `${e.clip_count} clip(s) · ${e.output_duration}s from a ${e.source_duration}s video` +
     ` · ${e.resolution}` + (t.zoom ? ` · ${e.zoomed_clips} zoomed` : "") +
@@ -185,7 +201,7 @@ function render() {
         ${e.available ? "" : `<span class="unavailable-badge">unavailable</span>`}
       </div>
       <div class="reel-body">
-        <div class="reel-title">${escapeHtml(e.title || "(untitled)")}</div>
+        <div class="reel-title">${e.kind === "session" ? `<span class="session-badge">Session</span>` : ""}${escapeHtml(e.title || "(untitled)")}</div>
         <div class="reel-meta">${fmtDate(e.created_at)}<br>${metaLine(e)}</div>
       </div>`;
     card.addEventListener("click", () => openModal(e));
@@ -204,6 +220,26 @@ function openModal(e) {
   $("m-title").textContent = e.title || "(untitled)";
   $("m-meta").textContent = `${fmtDate(e.created_at)} · ${metaLine(e)} · ${fmtBytes(e.size_bytes)}`;
   $("m-confirm").classList.add("hidden");
+  // a session reel lists what went into it, including what didn't make it;
+  // a single reel made inside a session links back to that session
+  const vids = $("m-videos"), from = $("m-from");
+  vids.innerHTML = "";
+  vids.classList.toggle("hidden", e.kind !== "session");
+  for (const v of (e.kind === "session" ? e.videos || [] : [])) {
+    const li = document.createElement("li");
+    li.className = v.state;
+    li.textContent = `${v.state === "joined" ? "✓" : "✗"} ${v.title || v.url}` +
+      (v.reason ? ` — ${v.reason}` : "");
+    vids.appendChild(li);
+  }
+  from.innerHTML = "";
+  from.classList.toggle("hidden", !e.session_id);
+  if (e.session_id) {
+    const a = document.createElement("a");
+    a.href = `/session/${e.session_id}`;
+    a.textContent = `From session ${e.session_id.slice(0, 6)}…`;
+    from.appendChild(a);
+  }
   if (e.available) {
     $("m-player").src = `/api/archive/${e.id}/video`;
     $("m-player").classList.remove("hidden");

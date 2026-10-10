@@ -30,6 +30,7 @@ services:
       # reels are named with time.strftime(), i.e. container-local time
       TZ: ${TZ:-UTC}
 
-# Deliberately no replicas/scaling: job state lives in a module-level dict in
-# app.py and the one-video-at-a-time rule (HTTP 409) is enforced in-process.
-# A second instance would break both.
+# Deliberately no replicas/scaling: one runner thread in the process is the
+# only consumer of the session queue and the only writer of each
+# storage/sessions/<id>/session.json. A second instance would process two
+# videos at once and race on those files.

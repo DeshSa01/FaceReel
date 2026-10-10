@@ -35,12 +35,14 @@ RUN pip install -r requirements-ytdlp.txt
 # code edit doesn't re-copy it.
 COPY models/ models/
 COPY static/ static/
-COPY app.py pipeline.py archive.py ./
+# Every module is listed by name -- a new one missing here builds a clean
+# image that dies on import (the 9ee1688 fix, for archive.py).
+COPY app.py pipeline.py archive.py sessions.py runner.py ./
 
 # uid 1000 matches the usual first non-root user on the host, so the
 # bind-mounted storage/ stays writable without a fight.
 RUN useradd --uid 1000 --create-home app \
- && mkdir -p storage/jobs storage/archive \
+ && mkdir -p storage/jobs storage/archive storage/sessions \
  && chown -R app:app storage
 USER app
 # Docker does not reliably derive HOME from the USER instruction, and deno
@@ -54,6 +56,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/', timeout=4)"
 
 # 0.0.0.0, not the dev 127.0.0.1, or the published port is unreachable.
-# No --workers: app.py holds job state in a module-level dict and enforces
-# one-video-at-a-time in-process, so a second worker would break both.
+# No --workers: one runner thread is the only consumer of the session queue
+# and the only writer of each session.json. A second worker would mean two
+# runners processing at once and two writers racing on the same files.
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8765"]

@@ -88,7 +88,7 @@ def _make_thumbnail(video_path, dest):
     return result.returncode == 0 and os.path.exists(dest)
 
 
-def archive_job(job_id, url, result, tuning, screenshot_path):
+def archive_job(job_id, url, result, tuning, screenshot_path, session_id=None):
     """Move a finished job's outputs into the archive as one atomic unit.
 
     Assembles everything under a .tmp-<id> staging directory and writes
@@ -115,6 +115,9 @@ def archive_job(job_id, url, result, tuning, screenshot_path):
 
         sidecar = {
             "id": job_id,
+            # absent on reels archived before sessions existed; list_entries
+            # reads a missing kind as "video", so old entries need no migration
+            "kind": "video",
             # with UTC offset so a reel's time is unambiguous across a TZ change
             "created_at": datetime.now().astimezone().replace(microsecond=0).isoformat(),
             "url": url,
@@ -130,9 +133,53 @@ def archive_job(job_id, url, result, tuning, screenshot_path):
             "zoomed_clips": result["zoomed_clips"],
             "tuning": asdict(tuning),
         }
+        if session_id:
+            sidecar["session_id"] = session_id
         with open(os.path.join(staging, SIDECAR_NAME), "w") as f:
             json.dump(sidecar, f, indent=2)
 
+        os.rename(staging, final)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return final
+
+
+def archive_session(sid, joined_path, info):
+    """Archive a session's joined reel under the session id (research D6),
+    with the same staging-then-rename atomicity and failure cleanup as
+    archive_job. info carries clip_count, output_duration, resolution and
+    videos -- the per-video summary, in session order, including the ones
+    that were skipped or failed (US2 scenario 3)."""
+    ensure_archive_dir()
+    staging = os.path.join(ARCHIVE_DIR, TMP_PREFIX + sid)
+    final = entry_dir(sid)
+    try:
+        os.makedirs(staging)
+        video_dest = os.path.join(staging, "output.mp4")
+        shutil.move(joined_path, video_dest)
+        thumb_ok = _make_thumbnail(video_dest, os.path.join(staging, "thumb.jpg"))
+        joined = sum(1 for v in info["videos"] if v["state"] == "joined")
+        sidecar = {
+            "id": sid,
+            "kind": "session",
+            "created_at": datetime.now().astimezone().replace(microsecond=0).isoformat(),
+            "url": None,
+            "title": f"Session {sid} · {joined} video{'s' if joined != 1 else ''}",
+            "filename": f"facereel-session-{sid}.mp4",
+            "video": "output.mp4",
+            "thumb": "thumb.jpg" if thumb_ok else None,
+            "screenshot": None,
+            "clip_count": info["clip_count"],
+            "source_duration": None,
+            "output_duration": info["output_duration"],
+            "resolution": info["resolution"],
+            "zoomed_clips": 0,
+            "tuning": None,
+            "videos": info["videos"],
+        }
+        with open(os.path.join(staging, SIDECAR_NAME), "w") as f:
+            json.dump(sidecar, f, indent=2)
         os.rename(staging, final)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
@@ -157,6 +204,7 @@ def list_entries():
         total_bytes += size
         thumb, screenshot, video = entry.get("thumb"), entry.get("screenshot"), entry.get("video")
         entries.append({
+            "kind": "video",
             **{k: v for k, v in entry.items() if k not in ("video", "thumb", "screenshot")},
             "size_bytes": size,
             "has_thumb": bool(thumb) and os.path.exists(os.path.join(de.path, thumb)),
