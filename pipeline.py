@@ -673,10 +673,42 @@ def _segment_filter(crop, source_size, out_height):
     return ",".join(parts) if parts else None
 
 
+def _probe_duration(path):
+    """A file's container duration, in seconds: the number the concat demuxer
+    uses to offset the file after it."""
+    out = _run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "csv=p=0", path]).stdout.strip()
+    return float(out or 0)
+
+
+# The clip map's end must agree with the reel's own duration to within this,
+# or the map is dropped rather than written wrong (004 data-model section 1).
+# Chosen, not measured: about one frame at 30 fps, rounded up -- below what a
+# viewer could notice on a timeline, above probe rounding.
+CLIP_MAP_TOLERANCE_S = 0.05
+
+
 def cut_and_stitch(video_path, intervals, job_dir, progress, crops=None, out_height=None):
-    """Cut each interval, concat into output.mp4. Returns the output path."""
+    """Cut each interval, concat into output.mp4. Returns (output path, clips).
+
+    clips is the clip map (004 research D13): [{start, end, source_start}] in
+    reel time, 2 dp. Each start is the running total of the *probed* durations
+    of the cut segments, not of the requested end - start. The concat demuxer
+    offsets each file by its container duration, and re-encoding rounds every
+    segment to whole frames while AAC priming pads the audio, so a nominal sum
+    drifts by up to about a frame per clip -- over 3 s across a 100-clip reel.
+    The probe reads the number the demuxer actually uses, so marks land exactly.
+
+    MEASURED on the dev Mac (Apple M4), 50 clips of ~1.7 s cut from a 1080p
+    reel: 38 ms per probe, 1.9 s of a 31.7 s cut-and-stitch (5.9%). The map
+    ended 0.023 s from the reel's probed length; the nominal sum was 2.54 s
+    off. The cost is kept because the alternative puts marks seconds wrong.
+    NOT YET MEASURED on the nucbox (N95), where both encode and probe are
+    slower; 004 task T082 owes that figure (constitution Principle II).
+    """
     source_size = _video_size(video_path) if crops or out_height else None
     seg_paths = []
+    clips, cursor = [], 0.0
     for i, (start, end) in enumerate(intervals):
         seg = os.path.join(job_dir, f"seg_{i:04d}.mp4")
         crop = crops[i] if crops else None
@@ -699,6 +731,10 @@ def cut_and_stitch(video_path, intervals, job_dir, progress, crops=None, out_hei
         ]
         _run(cmd)
         seg_paths.append(seg)
+        seg_len = _probe_duration(seg)
+        clips.append({"start": round(cursor, 2), "end": round(cursor + seg_len, 2),
+                      "source_start": round(start, 2)})
+        cursor += seg_len
 
     list_path = os.path.join(job_dir, "segments.txt")
     with open(list_path, "w") as f:
@@ -715,7 +751,7 @@ def cut_and_stitch(video_path, intervals, job_dir, progress, crops=None, out_hei
     for p in seg_paths:
         os.remove(p)
     os.remove(list_path)
-    return output
+    return output, clips
 
 
 def process_job(url, screenshot_path, job_dir, progress, tuning=None):
@@ -761,7 +797,13 @@ def process_job(url, screenshot_path, job_dir, progress, tuning=None):
                                          intervals, progress))
 
     progress("stitch", 84, f"Found {len(intervals)} clip(s). Cutting and stitching...")
-    output = cut_and_stitch(video_path, intervals, job_dir, progress, crops, out_height)
+    output, clips = cut_and_stitch(video_path, intervals, job_dir, progress, crops, out_height)
+    # Never write wrong marks: if the map doesn't add up to the reel, drop it
+    # and the reel plays as reels always have (004 FR-043).
+    reel_len = _probe_duration(output)
+    if not clips or abs(clips[-1]["end"] - reel_len) > CLIP_MAP_TOLERANCE_S:
+        print(f"Clip map dropped: ends at {clips[-1]['end'] if clips else None}s, reel is {reel_len:.2f}s.")
+        clips = None
 
     if proxy_path != video_path:
         os.remove(proxy_path)
@@ -775,6 +817,7 @@ def process_job(url, screenshot_path, job_dir, progress, tuning=None):
         "output_duration": round(sum(e - s for s, e in intervals), 1),
         "zoomed_clips": sum(1 for c in crops if c) if crops else 0,
         "resolution": "x".join(str(v) for v in _video_size(output)),
+        "clips": clips,
     }
 
 
@@ -846,6 +889,7 @@ def join_reels(paths, work_dir, progress):
     if len(set(keys)) == 1:
         progress("join", 50, f"Joining {n} reel(s) -- all match, no re-encode needed...")
         _concat_copy(paths, list_path, output)
+        durations = [p["duration"] for p in probes]
     else:
         counts = Counter((p["width"], p["height"], p["fps"]) for p in probes)
         (cw, ch, fps), _ = max(counts.items(), key=lambda kv: (kv[1], kv[0][0] * kv[0][1]))
@@ -875,9 +919,19 @@ def join_reels(paths, work_dir, progress):
             normalised.append(norm)
         progress("join", 92, f"Joining {n} normalised reel(s)...")
         _concat_copy(normalised, list_path, output)
+        # the files actually concatenated are the normalised ones, and
+        # re-encoding can shift a duration by a frame, so probe those rather
+        # than reuse the originals' durations (004 research D13)
+        durations = [_probe_duration(p) for p in normalised]
 
+    # where each input starts in the joined reel, for the session clip map
+    offsets, t = [], 0.0
+    for d in durations:
+        offsets.append(round(t, 2))
+        t += d
     return {
         "output": output,
         "output_duration": round(_probe_reel(output)["duration"], 1),
         "resolution": "x".join(str(v) for v in _video_size(output)),
+        "offsets": offsets,
     }

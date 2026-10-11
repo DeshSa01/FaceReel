@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 272 64" width="272" height="64">
+  <!-- Supercut lockup: the mark plus the wordmark (research D5). The wordmark
+       is live text in the system stack, as in the app header, so changing a
+       letter needs no font editor. "cut" carries the brand gradient. -->
+  <style>
+    .word { font: 800 38px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; letter-spacing: -0.02em; fill: #15151F; }
+    @media (prefers-color-scheme: dark) { .word { fill: #ECECF4; } }
+  </style>
+  <defs>
+    <linearGradient id="sc-gl" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5B3DF5"/>
+      <stop offset="1" stop-color="#E5306F"/>
+    </linearGradient>
+    <linearGradient id="sc-gw" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5B3DF5"/>
+      <stop offset="1" stop-color="#E5306F"/>
+    </linearGradient>
+    <clipPath id="sc-left-l" clipPathUnits="userSpaceOnUse">
+      <polygon points="51.70,-3.39 11.70,65.89 -22.94,45.89 17.06,-23.39"/>
+    </clipPath>
+    <clipPath id="sc-right-l" clipPathUnits="userSpaceOnUse">
+      <polygon points="54.30,-1.89 14.30,67.39 48.94,87.39 88.94,18.11"/>
+    </clipPath>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#sc-gl)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 22V13h9"/><path d="M42 13h9v9"/><path d="M51 42v9h-9"/><path d="M22 51h-9v-9"/>
+  </g>
+  <g fill="#FFFFFF" stroke="#FFFFFF" stroke-width="3" stroke-linejoin="round">
+    <polygon clip-path="url(#sc-left-l)" points="26,21 44,32 26,43"/>
+    <g transform="translate(0.75 -1.3)"><polygon clip-path="url(#sc-right-l)" points="26,21 44,32 26,43"/></g>
+  </g>
+  <text class="word" x="80" y="45">Super<tspan fill="url(#sc-gw)">cut</tspan></text>
+</svg>

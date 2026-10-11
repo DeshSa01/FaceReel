@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Supercut mark, 16-32px optical size (research D5): heavier brackets, a
+       larger triangle, and no cut, since a gap that narrow vanishes at 16px.
+       Also the favicon (favicon.svg is a copy). -->
+  <defs>
+    <linearGradient id="sc-gs" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5B3DF5"/>
+      <stop offset="1" stop-color="#E5306F"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#sc-gs)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11 23V11h12"/>
+    <path d="M41 11h12v12"/>
+    <path d="M53 41v12H41"/>
+    <path d="M23 53H11V41"/>
+  </g>
+  <polygon points="25,19 47,32 25,45" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round"/>
+</svg>

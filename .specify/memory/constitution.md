@@ -1,6 +1,20 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change: 1.0.0 → 1.0.1 (PATCH)
+
+Rationale: the application was renamed from FaceReel to Supercut (feature
+004-ui-overhaul). A name change alters no principle's meaning, so PATCH.
+
+Changed: the title and the scope sentence now name Supercut. The registry
+path `ghcr.io/deshsa01/facereel` is deliberately unchanged: it is the real
+image name, which the rename left as it was (004 research D17).
+
+Sections added or removed: none. Follow-up TODOs: none.
+
+----------------------------------------------------------------------------
+Previous report (1.0.0)
+----------------------------------------------------------------------------
 Version change: none → 1.0.0 (initial ratification)
 
 Rationale: First ratified constitution. The file previously contained only the
@@ -31,9 +45,9 @@ unmet gate would make the constitution a document to route around.
 Follow-up TODOs: none. No placeholder tokens remain.
 -->
 
-# FaceReel Constitution
+# Supercut Constitution
 
-FaceReel finds every appearance of a person in a YouTube video and stitches those
+Supercut (formerly FaceReel) finds every appearance of a person in a YouTube video and stitches those
 clips into one reel. It is a single-user application, run by its author on a home
 server. This constitution records the conventions the codebase already follows, so
 that they survive being handed to a new contributor or a fresh agent session.
@@ -190,4 +204,4 @@ written for correctness and maintainability, not for multi-tenant security or te
 process. Should the deployment ever become multi-user or internet-facing, this document
 requires a MAJOR revision before that happens.
 
-**Version**: 1.0.0 | **Ratified**: 2026-09-05 | **Last Amended**: 2026-09-05
+**Version**: 1.0.1 | **Ratified**: 2026-09-05 | **Last Amended**: 2026-10-10

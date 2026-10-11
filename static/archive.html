@@ -2,183 +2,214 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FaceReel Archive</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Archive · Supercut</title>
+<meta name="description" content="Every moment they appear, cut into one reel.">
+<!-- Theme, before the stylesheet and inline on purpose: it must set
+     data-theme before first paint or a forced theme flashes the other one
+     (004 research D2, FR-017). Identical copies in index.html and session.html. -->
+<script>try{var t=localStorage.getItem("supercut.theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="/static/css/supercut.css">
+<link rel="icon" href="/static/brand/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/brand/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#F6F6FA" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0A0A10" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Supercut">
 <style>
-  :root {
-    --bg: #f6f7f9; --card: #ffffff; --text: #1a2130; --muted: #64748b;
-    --accent: #4f46e5; --accent-2: #6366f1; --border: #e2e8f0; --error: #dc2626;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f1420; --card: #1a2130; --text: #e8ecf4; --muted: #94a3b8;
-      --accent: #818cf8; --accent-2: #6366f1; --border: #2d3748; --error: #f87171;
-    }
-  }
-  * { box-sizing: border-box; margin: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg); color: var(--text); min-height: 100vh;
-    display: flex; justify-content: center; padding: 40px 16px;
-  }
-  main { width: 100%; max-width: 900px; }
-  h1 { font-size: 1.5rem; margin-bottom: 4px; }
-  .sub { color: var(--muted); margin-bottom: 8px; font-size: 0.95rem; }
-  .back { color: var(--accent); font-size: 0.9rem; text-decoration: none; }
-  .back:hover { text-decoration: underline; }
-  .top-row {
-    display: flex; justify-content: space-between; align-items: baseline;
-    margin: 20px 0 20px;
-  }
-  .total { color: var(--muted); font-size: 0.9rem; }
-  .empty {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: 40px 24px; text-align: center; color: var(--muted);
-  }
-  .grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 16px;
-  }
-  .reel-card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    overflow: hidden; cursor: pointer; display: flex; flex-direction: column;
-  }
-  .reel-card:hover { border-color: var(--accent); }
-  .thumb-wrap {
-    aspect-ratio: 16 / 9; background: var(--bg); display: flex;
-    align-items: center; justify-content: center; overflow: hidden;
-    color: var(--muted); font-size: 0.8rem; position: relative;
-  }
-  .thumb-wrap img { width: 100%; height: 100%; object-fit: cover; }
-  .unavailable-badge {
-    position: absolute; top: 6px; right: 6px; background: var(--error);
-    color: #fff; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;
-  }
-  .reel-body { padding: 10px 12px 12px; }
-  .reel-title {
-    font-weight: 600; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-  }
-  .reel-meta { color: var(--muted); font-size: 0.78rem; margin-top: 6px; line-height: 1.4; }
-
-  .overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex;
-    align-items: center; justify-content: center; padding: 20px; z-index: 10;
-  }
-  .modal {
-    background: var(--card); border-radius: 12px; padding: 20px; width: 100%;
-    max-width: 640px; max-height: 90vh; overflow-y: auto;
-  }
-  .modal video { width: 100%; border-radius: 8px; background: #000; margin-top: 10px; }
-  .modal h2 { font-size: 1.1rem; margin-bottom: 4px; }
-  .modal .reel-meta { font-size: 0.85rem; margin-top: 10px; }
-  .modal-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
-  a.dl, button.close, button.delete {
-    padding: 8px 14px; border-radius: 8px; font-size: 0.85rem; font-weight: 600;
-    cursor: pointer; border: 1px solid var(--border); background: transparent;
-    color: var(--text); text-decoration: none; display: inline-block;
-  }
-  a.dl { border-color: var(--accent); color: var(--accent); }
-  button.retry {
-    padding: 8px 14px; border-radius: 8px; font-size: 0.85rem; font-weight: 600;
-    cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: #fff;
-  }
-  button.retry:disabled { opacity: 0.6; cursor: default; }
-  .m-retry-msg { font-size: 0.85rem; color: var(--error); margin-top: 8px; }
-  button.delete { border-color: var(--error); color: var(--error); }
-  button.delete:hover { background: var(--error); color: #fff; }
-  .confirm {
-    margin-top: 12px; padding: 12px; border-radius: 8px; border: 1px solid var(--error);
-    background: var(--bg); font-size: 0.85rem;
-  }
-  .confirm p { margin-bottom: 10px; color: var(--text); }
-  .confirm .row { display: flex; gap: 10px; }
-  .hidden { display: none; }
-  .session-badge {
-    display: inline-block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em;
-    color: #fff; background: var(--accent); border-radius: 4px; padding: 1px 6px;
-    margin-right: 6px; vertical-align: 1px;
-  }
-  .m-videos { margin-top: 14px; }
-  .m-group + .m-group { margin-top: 12px; }
-  .m-group h3 {
-    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
-    color: var(--muted); margin-bottom: 6px;
-  }
-  .m-group ul { list-style: none; padding: 0; }
-  .m-group li {
-    display: flex; gap: 8px; align-items: baseline; padding: 5px 0;
-    border-top: 1px solid var(--border); font-size: 0.85rem;
-  }
-  .m-group li:first-child { border-top: none; }
-  .m-mark { flex: none; width: 1em; text-align: center; }
-  .m-mark.ok { color: var(--accent); }
-  .m-mark.no { color: var(--error); }
+  /* page layout only; every colour, size and duration is a token */
+  .archive-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s-3) var(--s-5); margin-bottom: var(--s-5); }
+  .archive-head .titles { flex: 1 1 320px; }
+  .archive-head p { color: var(--muted); margin-top: var(--s-2); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--s-4); }
+  .reel-card { text-align: left; font: inherit; border: 1px solid var(--border); }
+  .reel-card .thumb { border-bottom: 1px solid var(--border); }
+  .reel-card .card-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .reel-card.is-unavailable .thumb img { opacity: .4; }
+  .viewer-body { padding: var(--s-5); }
+  .viewer-body h2 { font-size: var(--fs-lg); margin-bottom: var(--s-1); overflow-wrap: anywhere; }
+  .viewer-meta { color: var(--muted); font-size: var(--fs-sm); }
+  .viewer-close { position: absolute; top: var(--s-3); right: var(--s-3); z-index: 2; background: var(--scrim); color: var(--on-media); }
+  .viewer-close:hover:not(:disabled) { background: var(--scrim); color: var(--on-media); opacity: .85; }
+  .viewer-unavailable { aspect-ratio: 16 / 9; display: grid; place-items: center; color: var(--on-media); opacity: .7; font-size: var(--fs-sm); }
+  .m-from { margin-top: var(--s-3); font-size: var(--fs-sm); }
+  .m-videos { margin-top: var(--s-4); }
+  .m-group + .m-group { margin-top: var(--s-4); }
+  .m-group li { display: flex; gap: var(--s-2); align-items: baseline; padding: var(--s-2) 0; font-size: var(--fs-sm); }
+  .m-mark { flex: none; }
+  .m-mark.ok { color: var(--success); }
+  .m-mark.no { color: var(--danger); }
   .m-body { flex: 1; min-width: 0; }
-  .m-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
-  a.m-name { text-decoration: none; }
-  a.m-name:hover { text-decoration: underline; }
-  .m-from { font-size: 0.85rem; margin-top: 10px; }
-  .m-from a { color: var(--accent); }
+  .m-name { overflow-wrap: anywhere; }
+  .m-reason { display: block; color: var(--muted); font-size: var(--fs-xs); margin-top: 2px; }
+  .viewer-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-5); }
+  .viewer-actions .spacer { flex: 1; }
+  .viewer-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; background: var(--scrim); color: var(--on-media); }
+  .viewer-nav:hover:not(:disabled) { background: var(--scrim); color: var(--on-media); opacity: .85; }
+  .viewer-prev { left: var(--s-3); }
+  .viewer-next { right: var(--s-3); }
+  .toolbar { display: flex; flex-wrap: wrap; gap: var(--s-3); align-items: center; margin-bottom: var(--s-5); }
+  .toolbar .search { flex: 1 1 260px; max-width: 420px; }
+  .toolbar .search .btn { position: absolute; right: 4px; }
+  .toolbar .search .input { padding-right: 40px; }
+  .archive-head .meter { width: 260px; }
+  @media (max-width: 600px) { .archive-head .meter { width: 100%; } .toolbar .search { max-width: none; } }
+  .reel-card .thumb video { position: absolute; inset: 0; }
+  @media (prefers-reduced-motion: no-preference) {
+    .reel-card.is-leaving { opacity: 0; transform: scale(.94); transition: opacity var(--t-med), transform var(--t-med) var(--ease-out); }
+  }
+  .result-count { margin-left: auto; }
 </style>
 </head>
-<body>
-<main>
-  <a class="back" href="/">&larr; Sessions</a>
-  <h1>Archive</h1>
-  <p class="sub">Every reel that has finished generating, kept until you delete it.</p>
-
-  <div class="top-row">
-    <span class="total" id="total"></span>
-  </div>
-
-  <div class="empty hidden" id="empty">No reels archived yet. Generate one from the main page.</div>
-  <div class="grid" id="grid"></div>
-</main>
-
-<div class="overlay hidden" id="overlay">
-  <div class="modal">
-    <h2 id="m-title"></h2>
-    <p class="reel-meta" id="m-meta"></p>
-    <video id="m-player" controls playsinline></video>
-    <p class="m-from hidden" id="m-from"></p>
-    <div class="m-videos hidden" id="m-videos"></div>
-    <div class="modal-actions">
-      <button class="retry hidden" id="m-retry"></button>
-      <a class="dl" id="m-download">Download</a>
-      <button class="close" id="m-close">Close</button>
-      <button class="delete" id="m-delete-btn">Delete reel</button>
-    </div>
-    <p class="m-retry-msg hidden" id="m-retry-msg"></p>
-    <div class="confirm hidden" id="m-confirm">
-      <p id="m-confirm-text"></p>
-      <div class="row">
-        <button class="delete" id="m-confirm-yes">Yes, delete permanently</button>
-        <button class="close" id="m-confirm-no">Cancel</button>
+<body data-page="archive">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="app-header">
+  <div class="app-header-inner">
+    <a class="brand" href="/" aria-label="Supercut, all sessions">
+      <img src="/static/brand/mark.svg" alt="" width="28" height="28">
+      <span class="wordmark">Super<span class="cut">cut</span></span>
+    </a>
+    <nav class="app-nav" aria-label="Main">
+      <a href="/"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-layers"/></svg><span>Sessions</span></a>
+      <a href="/archive" aria-current="page"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-grid"/></svg><span>Archive</span></a>
+    </nav>
+    <div class="app-header-actions">
+      <button type="button" class="btn btn-quiet btn-icon" id="theme-btn" popovertarget="theme-menu"
+              aria-haspopup="menu" aria-label="Theme: System">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-monitor"/></svg>
+      </button>
+      <div class="menu" id="theme-menu" popover role="menu" aria-label="Theme">
+        <button type="button" class="menu-item" role="menuitemradio" data-theme-choice="light" aria-checked="false">
+          <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-sun"/></svg><span>Light</span>
+          <svg class="icon check" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg>
+        </button>
+        <button type="button" class="menu-item" role="menuitemradio" data-theme-choice="dark" aria-checked="false">
+          <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-moon"/></svg><span>Dark</span>
+          <svg class="icon check" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg>
+        </button>
+        <button type="button" class="menu-item" role="menuitemradio" data-theme-choice="system" aria-checked="true">
+          <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-monitor"/></svg><span>System</span>
+          <svg class="icon check" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg>
+        </button>
       </div>
     </div>
   </div>
-</div>
+</header>
 
+<main id="main" class="page page-archive">
+  <div class="archive-head">
+    <div class="titles">
+      <h1>Archive</h1>
+      <p>Every reel that has finished generating, kept until you delete it.</p>
+    </div>
+    <div class="meter" id="meter" hidden>
+      <div class="meter-label"><span id="meter-main"></span><span id="meter-free"></span></div>
+      <div class="meter-track" aria-hidden="true"><div class="meter-fill" id="meter-fill"></div><div class="meter-other" id="meter-other"></div></div>
+    </div>
+  </div>
+
+  <div class="toolbar" id="toolbar" hidden>
+    <div class="input-wrap search">
+      <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-search"/></svg>
+      <input class="input" type="search" id="q" placeholder="Search reels" aria-label="Search reels by title" autocomplete="off">
+      <button type="button" class="btn btn-quiet btn-icon btn-sm" id="q-clear" hidden aria-label="Clear search">
+        <svg class="icon icon-sm" aria-hidden="true"><use href="/static/icons.svg#i-x"/></svg>
+      </button>
+    </div>
+    <div class="segmented" role="group" aria-label="Show">
+      <button type="button" data-kind="all" aria-pressed="true">All</button>
+      <button type="button" data-kind="session" aria-pressed="false">Sessions</button>
+      <button type="button" data-kind="video" aria-pressed="false">Single videos</button>
+    </div>
+    <button type="button" class="btn btn-secondary btn-sm" id="sort-btn" popovertarget="sort-menu" aria-haspopup="menu">
+      <svg class="icon icon-sm" aria-hidden="true"><use href="/static/icons.svg#i-sort"/></svg>
+      <span id="sort-label">Newest</span>
+    </button>
+    <div class="menu" id="sort-menu" popover role="menu" aria-label="Sort by">
+      <button type="button" class="menu-item" role="menuitemradio" data-sort="newest" aria-checked="true">Newest<svg class="icon check" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg></button>
+      <button type="button" class="menu-item" role="menuitemradio" data-sort="oldest" aria-checked="false">Oldest<svg class="icon check" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg></button>
+      <button type="button" class="menu-item" role="menuitemradio" data-sort="longest" aria-checked="false">Longest<svg class="icon check" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg></button>
+      <button type="button" class="menu-item" role="menuitemradio" data-sort="largest" aria-checked="false">Largest<svg class="icon check" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg></button>
+    </div>
+    <span class="small muted tabular result-count" id="result-count" aria-live="polite"></span>
+  </div>
+
+  <div class="grid" id="skeleton" aria-hidden="true"></div>
+  <div id="empty" hidden></div>
+  <div class="grid" id="grid"></div>
+</main>
+
+<dialog class="modal modal-viewer" id="viewer" aria-labelledby="m-title">
+  <div class="viewer-media">
+    <button type="button" class="btn btn-icon viewer-close" id="m-close" aria-label="Close">
+      <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-x"/></svg>
+    </button>
+    <button type="button" class="btn btn-icon viewer-nav viewer-prev" id="m-prev" aria-label="Previous reel">
+      <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-chevron-left"/></svg>
+    </button>
+    <button type="button" class="btn btn-icon viewer-nav viewer-next" id="m-next" aria-label="Next reel">
+      <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-chevron-right"/></svg>
+    </button>
+    <video id="m-player" controls playsinline></video>
+    <div class="viewer-unavailable" id="m-unavailable" hidden>This reel's video file is missing.</div>
+  </div>
+  <div class="viewer-body">
+    <h2 id="m-title"></h2>
+    <p class="viewer-meta" id="m-meta"></p>
+    <p class="xsmall muted" id="m-pos"></p>
+    <p class="m-from" id="m-from" hidden></p>
+    <div class="m-videos" id="m-videos" hidden></div>
+    <div class="viewer-actions">
+      <button type="button" class="btn btn-primary" id="m-retry" hidden></button>
+      <a class="btn btn-secondary" id="m-download">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-download"/></svg><span>Download</span>
+      </a>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-danger" id="m-delete-btn">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-trash"/></svg><span>Delete reel</span>
+      </button>
+    </div>
+    <p class="field-error" id="m-retry-msg" hidden></p>
+  </div>
+</dialog>
+
+<dialog class="modal modal-confirm" id="confirm" aria-labelledby="m-confirm-title">
+  <div class="modal-inner">
+    <h2 id="m-confirm-title">Delete this reel?</h2>
+    <p class="small muted" id="m-confirm-text" style="margin-top:var(--s-2)"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-quiet" id="m-confirm-no">Cancel</button>
+      <button type="button" class="btn btn-danger is-solid" id="m-confirm-yes">Yes, delete permanently</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="/static/js/shell.js"></script>
 <script src="/static/progress.js"></script>
+<script src="/static/js/player.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-let entries = [];
-let current = null;
+const { el, badge, icon, fmtBytes, fmtDate } = Supercut;
 
-function fmtBytes(n) {
-  if (n < 1024) return n + " B";
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = n, i = -1;
-  do { v /= 1024; i++; } while (v >= 1024 && i < units.length - 1);
-  return v.toFixed(1) + " " + units[i];
+let entries = [];
+let totalBytes = 0;
+let disk = { total: null, free: null };
+let current = null;
+let clipStrip = null;   // the open reel's clip strip (FR-042)
+
+for (let i = 0; i < 8; i++) {
+  const c = el("div", "card card-media");
+  c.appendChild(el("div", "skeleton skeleton-thumb"));
+  const b = el("div", "card-body");
+  b.appendChild(el("div", "skeleton skeleton-text"));
+  const t2 = el("div", "skeleton skeleton-text"); t2.style.width = "60%";
+  b.appendChild(t2);
+  c.appendChild(b);
+  $("skeleton").appendChild(c);
 }
-function fmtDate(iso) {
-  const d = new Date(iso);
-  return d.toLocaleString(undefined, {
-    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-  });
-}
+
 function metaLine(e) {
   if (e.kind === "session") {
     const joined = (e.videos || []).filter(v => v.state === "joined").length;
@@ -190,13 +221,108 @@ function metaLine(e) {
     ` · lead-in ${t.lead_in}s, reach ${t.boundary_reach}s, gap ${t.clip_gap}s`;
 }
 
+/* ---- view state: search (not kept) + kind and sort (kept; FR-036) -------- */
+
+const VIEW_KEY = "supercut.archive";
+const KINDS = ["all", "session", "video"];
+const SORTS = { newest: "Newest", oldest: "Oldest", longest: "Longest", largest: "Largest" };
+const view = { q: "", kind: "all", sort: "newest" };
+try {
+  const saved = JSON.parse(Supercut.store(VIEW_KEY) || "{}");
+  // an unknown value from an older version, or a hand edit, falls back
+  if (KINDS.includes(saved.kind)) view.kind = saved.kind;
+  if (saved.sort in SORTS) view.sort = saved.sort;
+} catch { /* defaults */ }
+function saveView() { Supercut.store(VIEW_KEY, JSON.stringify({ kind: view.kind, sort: view.sort })); }
+
+// The one derivation of what's shown, used by the grid and by the viewer's
+// previous/next, so stepping follows exactly what's on screen (FR-038).
+function visible() {
+  const q = view.q.trim().toLowerCase();
+  const list = entries.filter(e =>
+    (view.kind === "all" || (view.kind === "session" ? e.kind === "session" : e.kind !== "session")) &&
+    (!q || (e.title || "").toLowerCase().includes(q)));
+  const by = {
+    newest: (a, b) => b.created_at.localeCompare(a.created_at),
+    oldest: (a, b) => a.created_at.localeCompare(b.created_at),
+    longest: (a, b) => (b.output_duration || 0) - (a.output_duration || 0),
+    largest: (a, b) => (b.size_bytes || 0) - (a.size_bytes || 0),
+  }[view.sort];
+  return list.sort(by);
+}
+
+function syncToolbar() {
+  $("q").value = view.q;
+  $("q-clear").hidden = !view.q;
+  for (const btn of document.querySelectorAll("[data-kind]")) btn.setAttribute("aria-pressed", String(btn.dataset.kind === view.kind));
+  for (const item of document.querySelectorAll("[data-sort]")) item.setAttribute("aria-checked", String(item.dataset.sort === view.sort));
+  $("sort-label").textContent = SORTS[view.sort];
+}
+$("q").addEventListener("input", () => { view.q = $("q").value; $("q-clear").hidden = !view.q; render(); });
+$("q-clear").addEventListener("click", () => { view.q = ""; syncToolbar(); render(); $("q").focus(); });
+for (const btn of document.querySelectorAll("[data-kind]")) {
+  btn.addEventListener("click", () => { view.kind = btn.dataset.kind; saveView(); syncToolbar(); render(); });
+}
+$("sort-menu").addEventListener("toggle", e => {
+  if (e.newState !== "open") return;
+  const r = $("sort-btn").getBoundingClientRect();
+  Object.assign($("sort-menu").style, { top: `${r.bottom + 6}px`, left: `${Math.min(r.left, innerWidth - 196)}px`, right: "auto" });
+  ($("sort-menu").querySelector('[aria-checked="true"]') || $("sort-menu").querySelector(".menu-item")).focus();
+});
+for (const item of document.querySelectorAll("[data-sort]")) {
+  item.addEventListener("click", () => {
+    view.sort = item.dataset.sort; saveView(); syncToolbar(); render();
+    $("sort-menu").hidePopover(); $("sort-btn").focus();
+  });
+}
+$("sort-menu").addEventListener("keydown", e => {
+  const items = [...$("sort-menu").querySelectorAll(".menu-item")], i = items.indexOf(document.activeElement);
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+  }
+});
+
+/* ---- storage meter (FR-039) ------------------------------------------ */
+
+// Free space under 10% (chosen) turns the meter amber: the archive only
+// grows, and nothing deletes reels but the user.
+const LOW_FREE = 0.10;
+function showMeter() {
+  $("meter").hidden = false;
+  $("meter-main").innerHTML = "";
+  $("meter-main").append(el("strong", null, Supercut.plural(entries.length, "reel")), ` · ${fmtBytes(totalBytes)}`);
+  if (disk.total && disk.free != null) {
+    const used = disk.total - disk.free;
+    $("meter-free").textContent = `${fmtBytes(disk.free)} free`;
+    $("meter-fill").style.width = `${Math.max(0.5, 100 * totalBytes / disk.total)}%`;
+    $("meter-other").style.width = `${Math.max(0, 100 * (used - totalBytes) / disk.total)}%`;
+    $("meter").classList.toggle("is-warning", disk.free / disk.total < LOW_FREE);
+    $("meter").title = `Archive ${fmtBytes(totalBytes)} · other files ${fmtBytes(Math.max(0, used - totalBytes))} · free ${fmtBytes(disk.free)} of ${fmtBytes(disk.total)}`;
+  } else {
+    // the server couldn't read the drive: show the archive's size alone
+    $("meter-free").textContent = "";
+    $("meter-fill").style.width = "0";
+    $("meter-other").style.width = "0";
+  }
+}
+
 async function load() {
-  const res = await fetch("/api/archive");
-  const data = await res.json();
-  entries = data.entries;
-  $("total").textContent = entries.length
-    ? `${entries.length} reel(s) · ${fmtBytes(data.total_bytes)} total`
-    : "";
+  try {
+    const res = await fetch("/api/archive");
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    entries = data.entries;
+    totalBytes = data.total_bytes;
+    disk = { total: data.disk_total_bytes, free: data.disk_free_bytes };
+  } catch {
+    $("skeleton").hidden = true;
+    Supercut.toast("Couldn't load the archive.", { kind: "error", action: { label: "Retry", onClick: load } });
+    return;
+  }
+  $("skeleton").hidden = true;
+  showMeter();
+  syncToolbar();
   render();
   openFromHash();
 }
@@ -213,30 +339,104 @@ function openFromHash() {
 }
 window.addEventListener("hashchange", openFromHash);
 
-function render() {
-  $("grid").innerHTML = "";
-  $("empty").classList.toggle("hidden", entries.length > 0);
-  for (const e of entries) {
-    const card = document.createElement("div");
-    card.className = "reel-card";
-    card.innerHTML = `
-      <div class="thumb-wrap">
-        ${e.has_thumb ? `<img src="/api/archive/${e.id}/thumb" alt="">` : "No preview"}
-        ${e.available ? "" : `<span class="unavailable-badge">unavailable</span>`}
-      </div>
-      <div class="reel-body">
-        <div class="reel-title">${e.kind === "session" ? `<span class="session-badge">Session</span>` : ""}${escapeHtml(e.title || "(untitled)")}</div>
-        <div class="reel-meta">${fmtDate(e.created_at)}<br>${metaLine(e)}</div>
-      </div>`;
-    card.addEventListener("click", () => openModal(e));
-    $("grid").appendChild(card);
-  }
+/* ---- hover and focus previews (FR-037) ------------------------------- */
+
+// The reel itself, muted, from its start -- not a generated preview clip,
+// which would add encoding work on a host where encoding is already the
+// bottleneck (spec assumption). 250 ms before starting (chosen) so sweeping
+// the pointer across the grid doesn't start a fetch per card; only the first
+// 6 s loop (chosen), which bounds the bytes fetched per hover.
+const PREVIEW_DELAY_MS = 250, PREVIEW_LOOP_S = 6;
+const canPreview = () => matchMedia("(hover: hover)").matches &&
+  matchMedia("(prefers-reduced-motion: no-preference)").matches;
+function attachPreview(card, e) {
+  if (!e.available) return;
+  let timer = null, vid = null;
+  const start = () => {
+    if (!canPreview() || vid) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      vid = document.createElement("video");
+      Object.assign(vid, { muted: true, playsInline: true, preload: "auto" });
+      vid.setAttribute("aria-hidden", "true");
+      vid.src = `/api/archive/${e.id}/video?v=${encodeURIComponent(e.created_at)}`;
+      vid.addEventListener("timeupdate", () => { if (vid && vid.currentTime >= PREVIEW_LOOP_S) vid.currentTime = 0; });
+      vid.addEventListener("ended", () => { if (vid) { vid.currentTime = 0; vid.play().catch(() => {}); } });
+      card.querySelector(".thumb").appendChild(vid);
+      vid.play().catch(() => {});
+    }, PREVIEW_DELAY_MS);
+  };
+  const stop = () => {
+    clearTimeout(timer);
+    if (!vid) return;
+    // dropping src releases the connection; without it the browser keeps
+    // buffering a video nobody is watching
+    vid.pause(); vid.removeAttribute("src"); vid.load(); vid.remove(); vid = null;
+  };
+  card.addEventListener("pointerenter", start);
+  card.addEventListener("pointerleave", stop);
+  card.addEventListener("focusin", start);
+  card.addEventListener("focusout", stop);
+  card.addEventListener("click", stop);
 }
 
-function escapeHtml(s) {
-  return s.replace(/[&<>"']/g, c => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  }[c]));
+function reelCard(e) {
+  const card = el("button", "card card-media card-interactive reel-card" + (e.available ? "" : " is-unavailable"));
+  card.type = "button";
+  card.dataset.id = e.id;
+  const thumb = el("div", "thumb" + (e.has_thumb ? "" : " is-placeholder"));
+  if (e.has_thumb) {
+    const img = el("img");
+    img.src = `/api/archive/${e.id}/thumb`;
+    img.alt = "";
+    img.loading = "lazy";
+    img.decoding = "async";
+    thumb.appendChild(img);
+  }
+  const badges = el("div", "thumb-badges");
+  if (e.kind === "session") badges.appendChild(badge("session", "Session"));
+  if (!e.available) badges.appendChild(badge("failed", "Unavailable"));
+  if (badges.childNodes.length) thumb.appendChild(badges);
+  thumb.appendChild(el("span", "thumb-chip", Supercut.fmtDuration(e.output_duration)));
+  card.appendChild(thumb);
+  const body = el("div", "card-body");
+  body.appendChild(el("div", "card-title", e.title || "(untitled)"));
+  card.title = e.title || "";
+  card.setAttribute("aria-label", `${e.title || "Untitled"}, ${Supercut.fmtDuration(e.output_duration)}`);
+  body.appendChild(el("div", "card-meta", `${Supercut.fmtShortDate(e.created_at)} · ${fmtBytes(e.size_bytes)}`));
+  card.appendChild(body);
+  card.addEventListener("click", () => openModal(e));
+  attachPreview(card, e);
+  return card;
+}
+
+function clearFilters() {
+  view.q = ""; view.kind = "all"; saveView(); syncToolbar(); render(); $("q").focus();
+}
+
+function render() {
+  const none = entries.length === 0;
+  const shown = visible();
+  $("toolbar").hidden = none;
+  $("empty").replaceChildren();
+  $("empty").hidden = shown.length > 0;
+  if (none) {
+    $("empty").appendChild(Supercut.emptyState({
+      art: "archive", title: "No reels yet",
+      body: "Every reel you make lands here, and stays until you delete it.",
+      action: { label: "Go to Sessions", href: "/", icon: "layers" },
+    }));
+  } else if (!shown.length) {
+    // US6 scenario 7, and a remembered filter that now matches nothing
+    $("empty").appendChild(Supercut.emptyState({
+      art: "search", title: "Nothing matches",
+      body: view.q ? `No reel's title contains “${view.q.trim()}”.` : "No reels of this kind yet.",
+      action: { label: "Clear filters", icon: "x", onClick: clearFilters },
+    }));
+  }
+  const filtered = view.q || view.kind !== "all";
+  $("result-count").textContent = filtered && !none ? `${shown.length} of ${entries.length}` : "";
+  $("grid").replaceChildren(...shown.map(reelCard));
 }
 
 // "youtube.com/watch?v=ID" rather than the whole link, for videos whose
@@ -250,24 +450,18 @@ function shortUrl(u) {
 
 function videoGroup(parent, heading, items, ok) {
   if (!items.length) return;
-  const group = document.createElement("div");
-  group.className = "m-group";
-  const h = document.createElement("h3");
-  h.textContent = `${heading} (${items.length})`;
-  group.appendChild(h);
-  const ul = document.createElement("ul");
+  const group = el("div", "m-group");
+  group.appendChild(el("h3", "section-title", `${heading} (${items.length})`));
+  const ul = el("ul", "list");
   for (const v of items) {
-    const li = document.createElement("li");
-    const mark = document.createElement("span");
-    mark.className = `m-mark ${ok ? "ok" : "no"}`;
-    mark.textContent = ok ? "✓" : "✕";
-    const body = document.createElement("span");
-    body.className = "m-body";
-    const name = document.createElement(v.url ? "a" : "span");
-    name.className = "m-name";
-    name.textContent = v.title || shortUrl(v.url);
+    const li = el("li");
+    const mark = el("span", `m-mark ${ok ? "ok" : "no"}`);
+    mark.appendChild(icon(ok ? "check" : "x", "icon-sm"));
+    const body = el("span", "m-body");
+    const name = el(v.url ? "a" : "span", "m-name", v.title || shortUrl(v.url));
     if (v.url) { name.href = v.url; name.target = "_blank"; name.rel = "noopener"; }
     body.appendChild(name);
+    if (!ok && v.reason) body.appendChild(el("span", "m-reason", v.reason));
     li.append(mark, body);
     ul.appendChild(li);
   }
@@ -279,12 +473,15 @@ function openModal(e) {
   current = e;
   $("m-title").textContent = e.title || "(untitled)";
   $("m-meta").textContent = `${fmtDate(e.created_at)} · ${metaLine(e)} · ${fmtBytes(e.size_bytes)}`;
-  $("m-confirm").classList.add("hidden");
+  const list = visible(), at = list.findIndex(x => x.id === e.id);
+  $("m-pos").textContent = at >= 0 && list.length > 1 ? `${at + 1} of ${list.length} · ← → to step through` : "";
+  $("m-prev").disabled = at <= 0;
+  $("m-next").disabled = at < 0 || at >= list.length - 1;
   // a session reel lists what went into it, including what didn't make it;
   // a single reel made inside a session links back to that session
   const vids = $("m-videos"), from = $("m-from");
-  vids.innerHTML = "";
-  vids.classList.toggle("hidden", e.kind !== "session");
+  vids.replaceChildren();
+  vids.hidden = e.kind !== "session";
   if (e.kind === "session") {
     const all = e.videos || [];
     videoGroup(vids, "Joined", all.filter(v => v.state === "joined"), true);
@@ -293,67 +490,125 @@ function openModal(e) {
   // Retrying reopens the session and rebuilds this reel once the retried
   // videos finish; the session page is where that progress shows.
   const failed = e.kind === "session" ? (e.videos || []).filter(v => v.state === "failed").length : 0;
-  $("m-retry").classList.toggle("hidden", !failed);
+  $("m-retry").hidden = !failed;
   $("m-retry").disabled = false;
   $("m-retry").textContent = `Retry ${failed} failed video${failed === 1 ? "" : "s"}`;
-  $("m-retry-msg").classList.add("hidden");
-  from.innerHTML = "";
-  from.classList.toggle("hidden", !e.session_id);
+  $("m-retry-msg").hidden = true;
+  from.replaceChildren();
+  from.hidden = !e.session_id;
   if (e.session_id) {
-    const a = document.createElement("a");
+    const a = el("a", null, `From session ${e.session_id.slice(0, 6)}…`);
     a.href = `/session/${e.session_id}`;
-    a.textContent = `From session ${e.session_id.slice(0, 6)}…`;
     from.appendChild(a);
   }
+  if (clipStrip) { clipStrip.destroy(); clipStrip = null; }
   if (e.available) {
+    clipStrip = SupercutPlayer.attach($("m-player"), e);
     $("m-player").src = `/api/archive/${e.id}/video?v=${encodeURIComponent(e.created_at)}`;
-    $("m-player").classList.remove("hidden");
+    $("m-player").hidden = false;
+    $("m-unavailable").hidden = true;
     $("m-download").href = `/api/archive/${e.id}/video`;
     $("m-download").download = e.filename;
-    $("m-download").classList.remove("hidden");
+    $("m-download").hidden = false;
   } else {
     $("m-player").removeAttribute("src");
-    $("m-player").classList.add("hidden");
-    $("m-download").classList.add("hidden");
+    $("m-player").hidden = true;
+    $("m-unavailable").hidden = false;
+    $("m-download").hidden = true;
   }
-  $("overlay").classList.remove("hidden");
+  // the address names the open reel, so it can be shared or reloaded
+  // (replaceState: stepping through twenty reels isn't twenty Back presses)
+  if (location.hash.slice(1) !== e.id) history.replaceState(null, "", `#${e.id}`);
+  if (!$("viewer").open) $("viewer").showModal();
 }
+function step(delta) {
+  if (!current) return;
+  const list = visible(), at = list.findIndex(x => x.id === current.id), next = list[at + delta];
+  if (next) openModal(next);
+}
+$("m-prev").addEventListener("click", () => step(-1));
+$("m-next").addEventListener("click", () => step(1));
+// ← → step through the current filtered, sorted order (no wrap-around);
+// Escape is native to <dialog>. Not while a control that uses arrows (the
+// video's own seek bar) has focus.
+$("viewer").addEventListener("keydown", e => {
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  if (document.activeElement === $("m-player")) return;
+  e.preventDefault();
+  step(e.key === "ArrowLeft" ? -1 : 1);
+});
 function closeModal() {
-  $("overlay").classList.add("hidden");
+  if ($("viewer").open) $("viewer").close();
+}
+// one teardown however the dialog closes (button, Escape, backdrop)
+$("viewer").addEventListener("close", () => {
+  if (clipStrip) { clipStrip.destroy(); clipStrip = null; }
   $("m-player").pause();
   $("m-player").removeAttribute("src");
+  $("m-player").load();
+  const id = current && current.id;
   current = null;
-}
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+  // focus returns to the card the viewer was showing
+  const card = id && document.querySelector(`.reel-card[data-id="${id}"]`);
+  if (card) card.focus({ preventScroll: false });
+});
+$("m-close").addEventListener("click", closeModal);
+// a click on the backdrop lands on the dialog element itself
+$("viewer").addEventListener("click", e => { if (e.target === $("viewer")) closeModal(); });
+
 $("m-retry").addEventListener("click", async () => {
   const id = current.id;
   $("m-retry").disabled = true;
   const res = await fetch(`/api/sessions/${id}/retry`, { method: "POST" });
   if (res.ok) { location.href = `/session/${id}`; return; }
   $("m-retry-msg").textContent = (await res.json()).detail || "Could not retry.";
-  $("m-retry-msg").classList.remove("hidden");
+  $("m-retry-msg").hidden = false;
   $("m-retry").disabled = false;
 });
-$("m-close").addEventListener("click", closeModal);
-$("overlay").addEventListener("click", e => { if (e.target === $("overlay")) closeModal(); });
 
 $("m-delete-btn").addEventListener("click", () => {
   $("m-confirm-text").textContent =
-    `Permanently delete "${current.title || "(untitled)"}"? This cannot be undone.`;
-  $("m-confirm").classList.remove("hidden");
+    `“${current.title || "(untitled)"}” will be permanently deleted. This cannot be undone.`;
+  $("confirm").showModal();
+  $("m-confirm-no").focus();
 });
-$("m-confirm-no").addEventListener("click", () => $("m-confirm").classList.add("hidden"));
+$("m-confirm-no").addEventListener("click", () => $("confirm").close());
+// Explicit click handlers rather than <form method="dialog"> plus a "close"
+// listener: with the viewer dialog stacked underneath, Chrome was seen to
+// close the confirmation without ever dispatching "close" once the viewer had
+// earlier been dismissed with Escape, so the delete silently never ran.
 $("m-confirm-yes").addEventListener("click", async () => {
-  const id = current.id;
-  const res = await fetch(`/api/archive/${id}`, { method: "DELETE" });
-  if (!res.ok) { alert("Delete failed."); return; }
+  $("confirm").close();
+  if (!current) return;
+  const target = current;
+  // where the viewer goes next, decided before the list changes
+  const list = visible(), at = list.findIndex(x => x.id === target.id);
+  const after = list[at + 1] || list[at - 1] || null;
+  const card = document.querySelector(`.reel-card[data-id="${target.id}"]`);
+  if (card) card.style.opacity = ".5";
+  let res;
+  try { res = await fetch(`/api/archive/${target.id}`, { method: "DELETE" }); } catch { res = null; }
+  if (!res || !res.ok) {
+    if (card) card.style.opacity = "";
+    Supercut.toast(`Couldn't delete “${target.title || "(untitled)"}”.`, { kind: "error" });
+    return;
+  }
   const { freed_bytes } = await res.json();
-  entries = entries.filter(e => e.id !== id);
-  const totalNow = entries.reduce((sum, e) => sum + e.size_bytes, 0);
-  $("total").textContent = entries.length
-    ? `${entries.length} reel(s) · ${fmtBytes(totalNow)} total`
-    : "";
-  render();
-  closeModal();
+  entries = entries.filter(e => e.id !== target.id);
+  totalBytes = Math.max(0, totalBytes - freed_bytes);
+  if (disk.free != null) disk.free += freed_bytes;
+  showMeter();
+  Supercut.toast(`Deleted “${target.title || "(untitled)"}” · freed ${fmtBytes(freed_bytes)}`, { kind: "success" });
+  // the viewer advances to the next reel, or closes when there isn't one
+  if (after) openModal(after); else closeModal();
+  const finish = () => render();
+  if (card && matchMedia("(prefers-reduced-motion: no-preference)").matches) {
+    card.style.opacity = "";
+    card.classList.add("is-leaving");
+    card.addEventListener("transitionend", finish, { once: true });
+    setTimeout(finish, 400);   // in case transitionend never fires
+  } else finish();
 });
 
 load();

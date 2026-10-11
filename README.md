@@ -1,8 +1,30 @@
-# FaceReel
+# Supercut
 
-Web app that takes a YouTube URL plus a screenshot of a person from that video,
-finds every moment the person appears, and stitches those clips into one
-continuous playable video.
+Formerly FaceReel. Web app that takes a YouTube URL plus a screenshot of a
+person from that video, finds every moment the person appears, and stitches
+those clips into one continuous playable video.
+
+## Look and feel
+
+Every page shares one header (the logo, Sessions, Archive) and one design
+system: `static/css/supercut.css` holds every colour, size and timing, and
+`static/js/shell.js` the shared behaviour. There is no build step and no
+front-end framework; the pages are plain HTML served as they are.
+
+- **Theme**: the sun/moon/monitor button at the right of the header picks
+  Light, Dark or System. System, the default, follows the operating system,
+  including when it switches at sunset. The choice is remembered per browser
+  (not per device or account), and other open tabs follow it.
+- **Browsers**: current Safari (17.5+, macOS and iOS), Chrome or Edge (123+)
+  and Firefox (120+). The themes rely on CSS `light-dark()`; an older browser
+  gets the light theme and otherwise works.
+- **Home screen**: on iOS, Share → Add to Home Screen gives a Supercut icon that
+  opens without browser chrome. On Android, Chrome only installs a full app
+  from an HTTPS address; over this app's plain-HTTP LAN address it adds a
+  shortcut that opens in a browser tab.
+- **Icons**: the PNG icons in `static/brand/` are rendered from the SVGs there
+  by `tools/render-icons.sh` (headless Chrome, run by hand). Re-run it and
+  commit the PNGs whenever the logo changes.
 
 ## Run locally
 
@@ -11,7 +33,19 @@ continuous playable video.
 ```
 
 Then open http://127.0.0.1:8765. The first page lists the **sessions** that
-are running and offers to create a new one.
+are running and offers to start a new one. The quickest start is to **paste a
+YouTube link** into the field at the top and press Start: that creates a
+session and opens it with the link already filled in, ready for the
+screenshot.
+
+On the session page the screenshot can be **pasted** (⌘V / Ctrl+V, anywhere on
+the page, even with the cursor in the link field), **dropped** onto the page,
+or chosen with the file picker. It shows as a round "Looking for" chip. A
+recognised YouTube link shows its thumbnail and title before you add it;
+thumbnails load straight from YouTube, titles through the app's
+`/api/youtube/preview`. Any other link is flagged but still accepted, exactly
+as before. The clip fine-tuning sliders live under **Advanced**, which opens
+by itself when the values aren't the defaults.
 
 A session is a queue of up to **10 videos**. Each video gets its own YouTube
 link, screenshot of the person, and settings. After the first one, the form
@@ -54,6 +88,24 @@ Sessions live on the server. Open the app from any browser or device, join a
 running session, and you'll see the same queue. Progress also shows in a bar
 pinned to the bottom of every page, naming the session and the video ("video 2
 of 5"). The bar announces when a session's joined reel is ready.
+
+While a video processes, its row shows each stage (download, scan, refine,
+frame when zoom is on, stitch) with the elapsed time. A tab in the background
+still shows progress: its title starts with the percentage ("42% · Scanning ·
+…") and, in browsers that redraw favicons (not Safari), the icon gains a
+progress ring. To keep that current, **a hidden tab checks every 10 seconds**
+instead of not at all; browsers slow long-hidden tabs to about once a minute
+regardless. When a session's reel is ready, its page shows it large with a
+short celebration, once per finished reel.
+
+**Notifications, the share sheet and one-click copy need HTTPS** (or
+`localhost`). Browsers only grant those to secure origins, and this app is
+served over plain HTTP on the LAN, so on the deployment there is no
+notification offer and no Share button; Copy link still works through a
+fallback, and the tab title is the background signal. Putting the app behind
+HTTPS (a reverse proxy, or Tailscale's HTTPS for the tailnet name) turns them
+on with no code change. On `localhost` they all work, so check them against the
+deployment, not just the dev machine.
 
 **Sessions survive restarts and redeploys.** If the app restarts mid-session,
 the video that was processing starts over from the beginning (its partial
@@ -196,6 +248,8 @@ downloaded source and proxy videos are deleted after processing.
 
 Reels download as `<first 5 letters of the video title>-<timestamp>.mp4`, e.g.
 `ricka-20260727-151225.mp4`, so repeated downloads don't overwrite each other.
+A session's joined reel downloads as `supercut-session-<id>.mp4`; ones made
+before the rename keep their original `facereel-session-<id>.mp4` name.
 
 **`storage/jobs/` is scratch.** Each video's folder is deleted as soon as that
 video finishes or fails, and so is a session join's working folder
@@ -233,10 +287,28 @@ redeployments, and it lives on the same bind-mounted volume the rest of
 `storage/` uses, so it survives a container being replaced entirely, not just
 restarted.
 
-Browse it at `/archive` (linked from the main page): a thumbnail grid, newest
-first, with in-page playback, download, and deletion. **Deletion is
-permanent** — there is no undo, no recycle bin, and a confirmation naming the
-reel is the only safeguard. Because nothing is ever deleted automatically,
+Browse it at `/archive` (linked from every page's header): a thumbnail grid
+with in-page playback, download, and deletion. Search narrows the grid by
+title as you type; filter to session reels or single reels, and sort by
+newest, oldest, longest or largest (the filter and sort are remembered per
+browser; the search isn't). Hovering or focusing a card plays a muted preview
+of the reel's first few seconds. In the viewer, ← and → step through the
+reels in the current order and Escape closes it. The meter at the top shows
+the archive's size against the drive it lives on, and turns amber when less
+than 10% of the drive is free. The home page shows the six newest reels.
+
+**Clip navigation**: under a reel's player, a strip shows every clip as a
+segment sized to its length, with the current one lit. Click a segment to
+jump to it; the ⏮ ⏭ buttons (or `[` and `]` while the player has focus) step
+between clips. A session reel's strip is tinted per source video and names
+the video under the pointer. Only reels made from this version on have it:
+the clip positions are recorded when the reel is cut (each cut segment's
+duration is measured, so the marks land exactly), and older reels play as
+they always did. In a session that joins an older reel with newer ones, the
+older one shows as a single stretch with its title. **Deletion is
+permanent** — there is no undo, no recycle bin, and an in-page confirmation
+naming the reel is the only safeguard. A failed delete says so in a message at
+the bottom of the page; the reel stays. Because nothing is ever deleted automatically,
 the archive only grows; the page shows the running total size on disk so
 that filling the drive is a visible risk rather than a silent one, and it's
 on you to delete old reels if space gets tight.

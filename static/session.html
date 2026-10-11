@@ -2,266 +2,319 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FaceReel session</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Session · Supercut</title>
+<meta name="description" content="Every moment they appear, cut into one reel.">
+<!-- Theme, before the stylesheet and inline on purpose: it must set
+     data-theme before first paint or a forced theme flashes the other one
+     (004 research D2, FR-017). Identical copies in index.html and archive.html. -->
+<script>try{var t=localStorage.getItem("supercut.theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="/static/css/supercut.css">
+<link rel="icon" href="/static/brand/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/brand/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#F6F6FA" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0A0A10" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Supercut">
 <style>
-  :root {
-    --bg: #f6f7f9; --card: #ffffff; --text: #1a2130; --muted: #64748b;
-    --accent: #4f46e5; --accent-2: #6366f1; --border: #e2e8f0; --error: #dc2626;
+  /* page layout only; every colour, size and duration is a token */
+  .session-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s-3) var(--s-5); margin-bottom: var(--s-5); }
+  .session-head h1 { flex: 1 1 320px; min-width: 0; }
+  .sid-row { display: flex; gap: var(--s-2); align-items: center; color: var(--muted); font-size: var(--fs-sm); }
+  .sid-row code { color: var(--text); }
+  /* minmax(0, 1fr), not the implicit auto track: an auto track grows to fit
+     the longest unbreakable title and pushes the page past a phone's edge */
+  .session-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-5); align-items: start; }
+  @media (min-width: 960px) {
+    .session-grid { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); }
+    .session-grid #form-card { position: sticky; top: calc(60px + var(--s-4)); }
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f1420; --card: #1a2130; --text: #e8ecf4; --muted: #94a3b8;
-      --accent: #818cf8; --accent-2: #6366f1; --border: #2d3748; --error: #f87171;
-    }
+  .session-grid.is-closed { grid-template-columns: minmax(0, 1fr); }
+  #form .field + .field, #form .field + .toggles, #form .toggles + .outcome { margin-top: var(--s-5); }
+  .toggles { border-top: 1px solid var(--border); padding-top: var(--s-5); }
+  .outcome { margin-top: var(--s-4); }
+  #form .disclosure { margin-top: var(--s-5); }
+  .form-foot { margin-top: var(--s-5); }
+  .form-foot .field-hint { text-align: center; margin-top: var(--s-2); }
+  .drop-content { display: flex; align-items: center; gap: var(--s-3); width: 100%; }
+  .drop-empty { flex-direction: column; gap: var(--s-2); }
+  .drop-empty .icon { width: 28px; height: 28px; color: var(--accent-text); }
+  .drop-empty strong { color: var(--text); font-weight: var(--fw-semibold); }
+  .drop-chip-text { flex: 1; min-width: 0; }
+  .drop-chip-text .truncate { display: block; }
+  .drop-change { flex: none; color: var(--accent-text); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+  .url-hint-warn { color: var(--warning); }
+  .q-main { display: flex; gap: var(--s-3); align-items: flex-start; }
+  .q-thumb { position: relative; flex: none; width: 96px; }
+  .q-thumb .thumb { width: 96px; border-radius: var(--r-md); }
+  .q-thumb .face-chip { position: absolute; right: -8px; bottom: -8px; }
+  .q-thumb .face-chip-ring { width: 30px; height: 30px; }
+  .q-body { flex: 1; min-width: 0; }
+  @media (max-width: 480px) { .q-thumb, .q-thumb .thumb { width: 64px; } .q-thumb .face-chip-ring { width: 24px; height: 24px; } }
+  .bar-track { height: 8px; border-radius: var(--r-full); background: var(--raised); overflow: hidden; margin: var(--s-3) 0 var(--s-2); }
+  .bar-fill { height: 100%; width: 0%; border-radius: var(--r-full); background: var(--gradient); }
+  @media (prefers-reduced-motion: no-preference) { .bar-fill { transition: width .6s var(--ease-out); } }
+  /* the non-finished outcomes use the presenter's frame as a plain card */
+  .reel-presenter.is-plain { background: var(--border); box-shadow: var(--shadow-1); }
+  .reel-presenter.is-plain .reel-presenter-head .icon { color: var(--muted); }
+  .reel-presenter.is-plain .reel-presenter-head h2 { font-size: var(--fs-lg); }
+  .q-row { padding: var(--s-4) 0; }
+  .q-row:first-child { padding-top: 0; }
+  .q-head { display: flex; gap: var(--s-3); align-items: center; }
+  .q-num { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; font-size: var(--fs-sm); width: 1.6em; }
+  .q-title { flex: 1; min-width: 0; font-weight: var(--fw-semibold); font-size: var(--fs-sm); }
+  .q-detail { color: var(--muted); font-size: var(--fs-xs); margin-top: var(--s-2); line-height: 1.5; }
+  .q-detail.is-failed { color: var(--danger); }
+  .q-detail.is-warning { color: var(--warning); }
+  .q-detail .bar-track { margin: var(--s-2) 0 0; height: 6px; }
+  .q-row.is-removed .q-title { text-decoration: line-through; color: var(--muted); }
+  .queue-foot { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-top: var(--s-4); }
+  .queue-foot:empty { display: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    .q-row.is-new { animation: sc-rise var(--t-med) var(--ease-out); }
   }
-  * { box-sizing: border-box; margin: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg); color: var(--text); min-height: 100vh;
-    display: flex; justify-content: center; padding: 40px 16px;
-  }
-  main { width: 100%; max-width: 640px; }
-  h1 { font-size: 1.5rem; margin-bottom: 4px; }
-  .sub { color: var(--muted); margin-bottom: 24px; font-size: 0.95rem; }
-  .sub a { color: var(--accent); }
-  .card {
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: 12px; padding: 24px; margin-bottom: 20px;
-  }
-  label { display: block; font-weight: 600; font-size: 0.9rem; margin: 16px 0 6px; }
-  label:first-child { margin-top: 0; }
-  input[type="url"] {
-    width: 100%; padding: 10px 12px; border: 1px solid var(--border);
-    border-radius: 8px; background: var(--bg); color: var(--text); font-size: 0.95rem;
-  }
-  input[type="url"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  .drop {
-    border: 2px dashed var(--border); border-radius: 8px; padding: 20px;
-    text-align: center; color: var(--muted); cursor: pointer; font-size: 0.9rem;
-  }
-  .drop.has-file { border-color: var(--accent); color: var(--text); }
-  .drop img { max-height: 120px; max-width: 100%; border-radius: 6px; margin-top: 10px; }
-  button {
-    margin-top: 20px; width: 100%; padding: 12px; border: none; border-radius: 8px;
-    background: var(--accent); color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
-  }
-  button:hover:not(:disabled) { background: var(--accent-2); }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .hidden { display: none; }
-  .bar-track {
-    height: 10px; background: var(--bg); border: 1px solid var(--border);
-    border-radius: 5px; overflow: hidden; margin: 12px 0 8px;
-  }
-  .bar-fill {
-    height: 100%; width: 0%; border-radius: 5px;
-    background: linear-gradient(90deg, var(--accent), var(--accent-2));
-    transition: width 0.6s ease;
-  }
-  .toggle-row {
-    display: flex; gap: 10px; align-items: flex-start; margin-top: 20px;
-    border-top: 1px solid var(--border); padding-top: 16px;
-  }
-  .toggle-row.no-rule { border-top: none; padding-top: 0; margin-top: 12px; }
-  .toggle-row.rec-row { margin-top: 14px; }
-  .toggle-row input { margin-top: 3px; accent-color: var(--accent); flex: none; }
-  .toggle-row label { margin: 0; cursor: pointer; }
-  .outcome {
-    margin-top: 12px; padding: 9px 11px; border-radius: 7px; background: var(--bg);
-    border: 1px solid var(--border); color: var(--muted); font-size: 0.8rem;
-    line-height: 1.45;
-  }
-  details.tuning { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 14px; }
-  details.tuning summary {
-    cursor: pointer; font-weight: 600; font-size: 0.9rem; color: var(--muted);
-  }
-  details.tuning summary:hover { color: var(--text); }
-  .knob { margin-top: 16px; }
-  .knob-head { display: flex; justify-content: space-between; align-items: baseline; }
-  .knob-head label { margin: 0; }
-  .knob-val {
-    font-variant-numeric: tabular-nums; font-size: 0.85rem; font-weight: 600;
-    color: var(--accent);
-  }
-  .knob-hint { color: var(--muted); font-size: 0.8rem; margin-top: 2px; line-height: 1.4; }
-  input[type="range"] { width: 100%; margin-top: 8px; accent-color: var(--accent); }
-  .reset {
-    margin-top: 16px; width: auto; padding: 6px 12px; font-size: 0.8rem;
-    background: transparent; color: var(--muted); border: 1px solid var(--border);
-  }
-  .reset:hover:not(:disabled) { background: var(--bg); color: var(--text); }
-  .status-msg { color: var(--muted); font-size: 0.9rem; }
-  .error { color: var(--error); font-size: 0.9rem; margin-top: 12px; }
-  video { width: 100%; border-radius: 8px; background: #000; margin-top: 8px; }
-  .stats { color: var(--muted); font-size: 0.85rem; margin-top: 10px; }
-  a.dl { color: var(--accent); font-size: 0.9rem; }
-  .sid-row { display: flex; gap: 8px; align-items: center; color: var(--muted);
-    font-size: 0.85rem; margin-bottom: 20px; }
-  .sid-row code { font-size: 0.85rem; color: var(--text); }
-  .small-btn {
-    margin: 0; width: auto; padding: 4px 10px; font-size: 0.8rem; font-weight: 600;
-    background: transparent; color: var(--muted); border: 1px solid var(--border);
-  }
-  .small-btn:hover:not(:disabled) { background: var(--bg); color: var(--text); }
-  button.secondary {
-    background: transparent; color: var(--accent); border: 1px solid var(--accent); margin-top: 12px;
-  }
-  button.secondary:hover:not(:disabled) { background: var(--bg); }
-  .notice {
-    border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px;
-    font-size: 0.9rem; margin-bottom: 20px; background: var(--card);
-  }
-  .queue { list-style: none; padding: 0; margin-top: 8px; }
-  .queue li { padding: 12px 0; border-top: 1px solid var(--border); }
-  .queue li:first-child { border-top: none; }
-  .q-head { display: flex; gap: 10px; align-items: baseline; }
-  .q-num { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
-  .q-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .q-state { flex: none; font-size: 0.8rem; font-weight: 600; color: var(--muted); }
-  .q-state.processing { color: var(--accent); }
-  .q-state.failed { color: var(--error); }
-  .q-detail { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
-  .q-detail.failed { color: var(--error); }
-  .queue li.removed .q-title { text-decoration: line-through; color: var(--muted); }
-  .queue a { color: var(--accent); }
-  h2 { font-size: 1.05rem; margin-bottom: 4px; }
+  .page-session > * + * { margin-top: var(--s-5); }
+  .page-session > .session-head { margin-top: 0; }
 </style>
 </head>
-<body>
-<main>
-  <h1>FaceReel session</h1>
-  <p class="sub"><a href="/">&larr; All sessions</a> &nbsp;·&nbsp; <a href="/archive">Archive</a></p>
-  <div class="sid-row hidden" id="sid-row">
-    Session <code id="sid"></code>
-    <button type="button" class="small-btn" id="copy-sid">Copy</button>
+<body data-page="session">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="app-header">
+  <div class="app-header-inner">
+    <a class="brand" href="/" aria-label="Supercut, all sessions">
+      <img src="/static/brand/mark.svg" alt="" width="28" height="28">
+      <span class="wordmark">Super<span class="cut">cut</span></span>
+    </a>
+    <nav class="app-nav" aria-label="Main">
+      <a href="/" aria-current="page"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-layers"/></svg><span>Sessions</span></a>
+      <a href="/archive"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-grid"/></svg><span>Archive</span></a>
+    </nav>
+    <div class="app-header-actions">
+      <button type="button" class="btn btn-quiet btn-icon" id="theme-btn" popovertarget="theme-menu"
+              aria-haspopup="menu" aria-label="Theme: System">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-monitor"/></svg>
+      </button>
+      <div class="menu" id="theme-menu" popover role="menu" aria-label="Theme">
+        <button type="button" class="menu-item" role="menuitemradio" data-theme-choice="light" aria-checked="false">
+          <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-sun"/></svg><span>Light</span>
+          <svg class="icon check" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg>
+        </button>
+        <button type="button" class="menu-item" role="menuitemradio" data-theme-choice="dark" aria-checked="false">
+          <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-moon"/></svg><span>Dark</span>
+          <svg class="icon check" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg>
+        </button>
+        <button type="button" class="menu-item" role="menuitemradio" data-theme-choice="system" aria-checked="true">
+          <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-monitor"/></svg><span>System</span>
+          <svg class="icon check" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="page page-session">
+  <div class="session-head" id="session-head">
+    <h1 class="truncate" id="s-title">Session</h1>
+    <div class="sid-row" id="sid-row" hidden>
+      <span>Session</span> <code id="sid"></code>
+      <button type="button" class="btn btn-quiet btn-icon btn-sm" id="copy-sid" aria-label="Copy session id">
+        <svg class="icon icon-sm" aria-hidden="true"><use href="/static/icons.svg#i-copy"/></svg>
+      </button>
+    </div>
   </div>
 
-  <div class="card hidden" id="missing">
-    <strong>Session not found.</strong>
-    <p class="status-msg">It may have been discarded. <a href="/">Back to all sessions</a></p>
+  <div id="skeleton" aria-hidden="true">
+    <div class="session-grid">
+      <div class="card"><div class="skeleton skeleton-text" style="width:40%"></div>
+        <div class="skeleton skeleton-row" style="margin-top:var(--s-5)"></div>
+        <div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div></div>
+      <div class="card"><div class="skeleton skeleton-text" style="width:30%"></div>
+        <div class="skeleton skeleton-row" style="margin-top:var(--s-5)"></div><div class="skeleton skeleton-row"></div></div>
+    </div>
   </div>
 
-  <div class="notice hidden" id="warning">
-    This session will finish and be joined when the current video completes &mdash;
-    add another video now to keep it open.
+  <div id="missing" hidden></div>
+
+  <div id="notify-slot"></div>
+
+  <div class="notice is-warning" id="warning" hidden role="status">
+    <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-alert-triangle"/></svg>
+    <div>This session will finish and be joined when the current video completes &mdash;
+      add another video now to keep it open.</div>
   </div>
 
-  <div class="card hidden" id="join-card">
-    <strong id="join-label">Joining the session's reels...</strong>
+  <div class="card" id="join-card" hidden>
+    <div class="card-head" style="margin-bottom:0">
+      <h2 id="join-label">Joining the session's reels&hellip;</h2>
+      <span id="join-badge"></span>
+    </div>
     <div class="bar-track"><div class="bar-fill" id="join-bar"></div></div>
-    <p class="status-msg" id="join-msg"></p>
+    <div class="row small muted"><span class="spacer truncate" id="join-msg"></span>
+      <span class="tabular" id="join-clock"></span></div>
   </div>
 
-  <div class="card hidden" id="ended-card">
-    <strong id="ended-title"></strong>
-    <video id="player" class="hidden" controls playsinline></video>
-    <p class="stats" id="ended-stats"></p>
-    <a class="dl hidden" id="download">Download joined reel</a>
-    <p class="error hidden" id="ended-error"></p>
-    <button type="button" class="secondary hidden" id="retry-ended"></button>
-    <button type="button" id="new-session">Start a new session</button>
+  <div class="reel-presenter" id="ended-card" hidden>
+    <div class="reel-presenter-inner">
+      <div class="reel-presenter-head">
+        <svg class="icon" id="ended-icon" aria-hidden="true"><use href="/static/icons.svg#i-sparkles"/></svg>
+        <h2 id="ended-title"></h2>
+      </div>
+      <video id="player" hidden controls playsinline></video>
+      <div class="stat-chips" id="stat-chips" hidden></div>
+      <p class="small muted" id="ended-stats" style="margin-top:var(--s-3)"></p>
+      <p class="field-error" id="ended-error" hidden></p>
+      <div class="presenter-actions">
+        <a class="btn btn-primary" id="download" hidden>
+          <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-download"/></svg><span>Download</span>
+        </a>
+        <button type="button" class="btn btn-secondary" id="copy-link" hidden>
+          <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-link"/></svg><span>Copy link</span>
+        </button>
+        <button type="button" class="btn btn-secondary" id="share" hidden>
+          <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-share"/></svg><span>Share</span>
+        </button>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-secondary" id="retry-ended" hidden></button>
+        <button type="button" class="btn btn-quiet" id="new-session">
+          <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-plus"/></svg><span>Start a new session</span>
+        </button>
+      </div>
+    </div>
   </div>
 
-  <div class="card hidden" id="form-card">
-    <h2>Add a video</h2>
-    <form id="form">
-      <label for="url">YouTube video URL</label>
-      <input type="url" id="url" required placeholder="https://www.youtube.com/watch?v=...">
+  <div class="session-grid" id="session-grid" hidden>
+    <div class="card" id="form-card" hidden>
+      <div class="card-head"><h2>Add a video</h2></div>
+      <form id="form" novalidate>
+        <div class="field">
+          <label class="field-label" for="url">YouTube video URL</label>
+          <div class="input-wrap">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-link"/></svg>
+            <input class="input" type="url" id="url" required inputmode="url" autocomplete="off"
+                   placeholder="https://www.youtube.com/watch?v=..." aria-describedby="url-hint">
+          </div>
+          <p class="field-hint" id="url-hint" hidden></p>
+          <div class="link-preview" id="link-preview" hidden aria-live="polite"></div>
+        </div>
 
-      <label>Screenshot of the person</label>
-      <div class="drop" id="drop">
-        <span id="drop-text">Click to choose an image (a clear shot of their face)</span>
-        <img id="preview" class="hidden" alt="">
-        <input type="file" id="file" accept="image/*" hidden>
+        <div class="field">
+          <span class="field-label" id="drop-label">Screenshot of the person</span>
+          <div class="dropzone" id="drop" role="button" tabindex="0" aria-labelledby="drop-label drop-text">
+            <div class="drop-content" id="drop-content"></div>
+            <span class="visually-hidden" id="drop-text"></span>
+            <input type="file" id="file" accept="image/*" hidden>
+          </div>
+          <p class="field-hint" id="reuse-row" hidden><a href="#" id="reuse">Reuse the previous screenshot instead</a></p>
+        </div>
+
+        <div class="toggles">
+          <div class="toggle-row">
+            <input class="toggle" type="checkbox" role="switch" id="zoom">
+            <div class="toggle-text">
+              <label for="zoom">Zoom in on the subject</label>
+              <p class="field-hint">When the person fills little of the frame, reframe
+                around them instead of showing the whole shot.</p>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <input class="toggle" type="checkbox" role="switch" id="hi_res">
+            <div class="toggle-text">
+              <label for="hi_res">Download the source in 4K</label>
+              <p class="field-hint">Best rendition up to 2160p instead of 1080p. Much
+                slower to download and stitch.</p>
+            </div>
+          </div>
+          <p class="notice outcome small" id="outcome"></p>
+        </div>
+
+        <details class="disclosure" id="tuning">
+          <summary>
+            <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-sliders"/></svg>
+            <span>Advanced <span class="muted" style="font-weight:var(--fw-regular)">· clip start fine-tuning</span></span>
+            <svg class="icon chev" aria-hidden="true"><use href="/static/icons.svg#i-chevron-right"/></svg>
+          </summary>
+          <div class="disclosure-body">
+            <div class="toggle-row" style="margin-bottom:var(--s-5)">
+              <input class="toggle" type="checkbox" role="switch" id="recommended">
+              <div class="toggle-text">
+                <label for="recommended">Use recommended</label>
+                <p class="field-hint">0.15 / 0.6 / 0.6 — measured to keep 100% of the
+                  genuine footage, against 79.8% at 0 / 0 / 0. Moving any slider
+                  clears this.</p>
+              </div>
+            </div>
+
+            <div class="knob">
+              <div class="knob-head">
+                <label for="lead_in">Lead-in</label>
+                <span class="knob-val" id="lead_in-val"></span>
+              </div>
+              <input class="slider" type="range" id="lead_in" min="-0.5" max="1" step="0.05" value="0">
+              <p class="field-hint">Footage kept before the person is first recognised.
+                Negative cuts into them for a hard entry.</p>
+            </div>
+
+            <div class="knob">
+              <div class="knob-head">
+                <label for="boundary_reach">Boundary reach</label>
+                <span class="knob-val" id="boundary_reach-val"></span>
+              </div>
+              <input class="slider" type="range" id="boundary_reach" min="0" max="3" step="0.1" value="0">
+              <p class="field-hint">How far a clip edge may walk outward hunting for the
+                true entry. Off at 0, so clips begin on a verified frame and can start
+                up to 0.5s late. Raise to ~0.6 to recover those late starts.</p>
+            </div>
+
+            <div class="knob">
+              <div class="knob-head">
+                <label for="clip_gap">Clip gap</label>
+                <span class="knob-val" id="clip_gap-val"></span>
+              </div>
+              <input class="slider" type="range" id="clip_gap" min="0" max="3" step="0.1" value="0">
+              <p class="field-hint">Longest unverified stretch allowed inside one clip.
+                At 0 every detection must stand on its own, so weak edge frames are
+                dropped. Raise to ~0.6 to keep them and get longer clips.</p>
+            </div>
+
+            <button type="button" class="btn btn-quiet btn-sm" id="reset-tuning" style="margin-top:var(--s-4)">
+              <svg class="icon icon-sm" aria-hidden="true"><use href="/static/icons.svg#i-refresh"/></svg>
+              <span>Reset to defaults</span>
+            </button>
+          </div>
+        </details>
+
+        <div class="form-foot">
+          <button type="submit" class="btn btn-primary btn-lg btn-block" id="go">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-plus"/></svg><span>Add to queue</span>
+          </button>
+          <p class="field-hint" id="slots"></p>
+          <p class="field-error" id="form-error" hidden role="alert"></p>
+        </div>
+      </form>
+    </div>
+
+    <div class="card" id="queue-card" hidden>
+      <div class="card-head"><h2>Queue</h2><span class="small muted tabular" id="queue-count"></span></div>
+      <div id="empty-queue" hidden></div>
+      <ul class="list" id="queue"></ul>
+      <div class="queue-foot" id="queue-foot">
+        <button type="button" class="btn btn-secondary btn-sm" id="retry-open" hidden></button>
+        <button type="button" class="btn btn-danger btn-sm" id="discard" hidden>
+          <svg class="icon icon-sm" aria-hidden="true"><use href="/static/icons.svg#i-trash"/></svg><span>Discard this empty session</span>
+        </button>
       </div>
-      <p class="knob-hint hidden" id="reuse-row"><a href="#" id="reuse">Reuse the previous screenshot instead</a></p>
-
-      <div class="toggle-row">
-        <input type="checkbox" id="zoom">
-        <div>
-          <label for="zoom">Zoom in on the subject</label>
-          <p class="knob-hint">When the person fills little of the frame, reframe
-            around them instead of showing the whole shot.</p>
-        </div>
-      </div>
-
-      <div class="toggle-row no-rule">
-        <input type="checkbox" id="hi_res">
-        <div>
-          <label for="hi_res">Download the source in 4K</label>
-          <p class="knob-hint">Best rendition up to 2160p instead of 1080p. Much
-            slower to download and stitch.</p>
-        </div>
-      </div>
-
-      <p class="outcome" id="outcome"></p>
-
-      <details class="tuning" open>
-        <summary>Clip start fine-tuning</summary>
-
-        <div class="toggle-row no-rule rec-row">
-          <input type="checkbox" id="recommended">
-          <div>
-            <label for="recommended">Use recommended</label>
-            <p class="knob-hint">0.15 / 0.6 / 0.6 — measured to keep 100% of the
-              genuine footage, against 79.8% at 0 / 0 / 0. Moving any slider
-              clears this.</p>
-          </div>
-        </div>
-
-        <div class="knob">
-          <div class="knob-head">
-            <label for="lead_in">Lead-in</label>
-            <span class="knob-val" id="lead_in-val"></span>
-          </div>
-          <input type="range" id="lead_in" min="-0.5" max="1" step="0.05" value="0">
-          <p class="knob-hint">Footage kept before the person is first recognised.
-            Negative cuts into them for a hard entry.</p>
-        </div>
-
-        <div class="knob">
-          <div class="knob-head">
-            <label for="boundary_reach">Boundary reach</label>
-            <span class="knob-val" id="boundary_reach-val"></span>
-          </div>
-          <input type="range" id="boundary_reach" min="0" max="3" step="0.1" value="0">
-          <p class="knob-hint">How far a clip edge may walk outward hunting for the
-            true entry. Off at 0, so clips begin on a verified frame and can start
-            up to 0.5s late. Raise to ~0.6 to recover those late starts.</p>
-        </div>
-
-        <div class="knob">
-          <div class="knob-head">
-            <label for="clip_gap">Clip gap</label>
-            <span class="knob-val" id="clip_gap-val"></span>
-          </div>
-          <input type="range" id="clip_gap" min="0" max="3" step="0.1" value="0">
-          <p class="knob-hint">Longest unverified stretch allowed inside one clip.
-            At 0 every detection must stand on its own, so weak edge frames are
-            dropped. Raise to ~0.6 to keep them and get longer clips.</p>
-        </div>
-
-        <button type="button" class="reset" id="reset-tuning">Reset to defaults</button>
-      </details>
-
-      <button type="submit" id="go">Add to queue</button>
-      <p class="knob-hint" id="slots"></p>
-      <p class="error hidden" id="form-error"></p>
-    </form>
-  </div>
-
-  <div class="card hidden" id="queue-card">
-    <h2>Queue</h2>
-    <p class="status-msg hidden" id="empty-queue">No videos yet. Add the first one above &mdash;
-      it starts processing straight away.</p>
-    <button type="button" class="small-btn hidden" id="retry-open"></button>
-    <ul class="queue" id="queue"></ul>
-    <button type="button" class="small-btn hidden" id="discard">Discard this empty session</button>
+    </div>
   </div>
 </main>
+
+<script src="/static/js/shell.js"></script>
 <script src="/static/progress.js"></script>
+<script src="/static/js/player.js"></script>
 <script>
 const $ = id => document.getElementById(id);
+const { el, badge, icon } = Supercut;
 const stageNames = {
   start: "Starting", reference: "Reading screenshot", download: "Downloading video",
   scan: "Scanning for the person", refine: "Refining clip boundaries",
@@ -287,6 +340,13 @@ function setKnobs(values) {
     showKnob(id);
   }
   syncRecommended();
+  revealTuning();
+}
+// FR-027: Advanced opens by itself whenever its values aren't the defaults,
+// so non-default settings are never hidden. It only ever opens; closing is
+// the user's call.
+function revealTuning() {
+  if (Object.entries(knobs).some(([id, d]) => Math.abs(+$(id).value - d) > 1e-9)) $("tuning").open = true;
 }
 
 for (const id of Object.keys(knobs)) {
@@ -312,13 +372,8 @@ $("hi_res").addEventListener("change", showOutcome);
 showOutcome();
 
 $("drop").addEventListener("click", () => $("file").click());
-$("file").addEventListener("change", () => {
-  const f = $("file").files[0];
-  if (!f) return;
-  $("drop").classList.add("has-file");
-  $("drop-text").textContent = f.name;
-  $("preview").src = URL.createObjectURL(f);
-  $("preview").classList.remove("hidden");
+$("drop").addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); }
 });
 
 
@@ -328,9 +383,13 @@ let session = null;
 // screenshot may have been added from another device, so "same screenshot"
 // is a server-side reference to an earlier video in this session.
 let useOwnFile = false;     // the user picked a file instead of the prefill
+let chosenFile = null;      // that file, however it arrived: picker, drop or paste
+let chosenUrl = null;       // its object URL, revoked when replaced
 let prefillApplied = null;  // from_video whose tuning was last copied into the form
 let playerSrcSet = false;
 let submitting = false;
+let handoffFocus = false;    // focus the dropzone once the form first shows
+let notifyOffered = false;
 
 function shortUrl(u) {
   try {
@@ -338,49 +397,203 @@ function shortUrl(u) {
     return id ? `youtube.com/watch?v=${id}` : x.host + x.pathname;
   } catch { return u || ""; }
 }
-function el(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined) e.textContent = text;
-  return e;
-}
 function showFormError(msg) {
   $("form-error").textContent = msg;
-  $("form-error").classList.remove("hidden");
+  $("form-error").hidden = false;
 }
+// failures of actions that aren't the form (remove, retry, discard) go to a
+// toast, so the message appears wherever the user is looking (FR-013)
+async function failToast(res, fallback) {
+  let msg = fallback;
+  try { msg = (await res.json()).detail || fallback; } catch { /* keep fallback */ }
+  Supercut.toast(msg, { kind: "error" });
+}
+
+/* ---- link preview (FR-025): thumbnail at once, title when it arrives ----- */
+
+let previewSeq = 0, previewTimer = null;
+function showLinkPreview() {
+  const link = $("url").value.trim();
+  const id = Supercut.youtubeId(link);
+  const box = $("link-preview"), hint = $("url-hint");
+  // a non-YouTube link gets a hint but is never blocked: the server accepts
+  // exactly what it accepted before
+  hint.hidden = !(link && !id);
+  hint.className = "field-hint url-hint-warn";
+  hint.textContent = "That doesn't look like a YouTube video link.";
+  if (!id) { box.hidden = true; box.dataset.id = ""; return; }
+  if (box.dataset.id === id) return;
+  box.dataset.id = id;
+  box.replaceChildren(Supercut.thumbImg(link));
+  const text = el("div", "link-preview-text");
+  const title = el("div", "link-preview-title");
+  title.appendChild(el("div", "skeleton skeleton-text"));
+  text.appendChild(title);
+  const sub = el("div", "link-preview-sub", `youtu.be/${id}`);
+  text.appendChild(sub);
+  box.appendChild(text);
+  box.hidden = false;
+  const seq = ++previewSeq;
+  fetch(`/api/youtube/preview?url=${encodeURIComponent(link)}`)
+    .then(r => r.ok ? r.json() : null).catch(() => null)
+    .then(d => {
+      if (seq !== previewSeq) return;   // a newer link replaced this one
+      title.textContent = (d && d.title) || "YouTube video";
+      if (d && d.author) sub.textContent = d.author;
+    });
+}
+// 400 ms after the last keystroke (chosen): waits out typing, but a paste
+// (one input event) previews almost at once
+$("url").addEventListener("input", () => {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(showLinkPreview, 400);
+});
+$("url").addEventListener("paste", () => { clearTimeout(previewTimer); setTimeout(showLinkPreview, 0); });
+
+// Hand-off from the home page's start field (research D8): fill the link,
+// drop the parameter so a reload doesn't bring back a link the user has since
+// cleared, and focus the dropzone so the very next paste is the screenshot.
+(function takeHandoff() {
+  const params = new URLSearchParams(location.search);
+  const link = params.get("url");
+  if (!link) return;
+  $("url").value = link;
+  params.delete("url");
+  history.replaceState(null, "", location.pathname + (params.toString() ? "?" + params : "") + location.hash);
+  showLinkPreview();
+  handoffFocus = true;
+})();
 
 $("sid").textContent = sid;
 $("copy-sid").addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText(sid); $("copy-sid").textContent = "Copied"; }
-  catch { $("copy-sid").textContent = "Copy failed"; }
-  setTimeout(() => { $("copy-sid").textContent = "Copy"; }, 1500);
+  const ok = await Supercut.copyText(sid);
+  Supercut.toast(ok ? "Session id copied." : "Couldn't copy the session id.", { kind: ok ? "success" : "error" });
 });
 
+/* ---- the screenshot: picker, drag-and-drop, or paste (FR-022 to FR-024) */
+
+function isImage(f) { return f && /^image\//.test(f.type); }
+// One way in for every source. A non-image is refused with the current
+// screenshot kept (FR-023).
+function setFile(file, { many = false } = {}) {
+  if (!isImage(file)) {
+    Supercut.toast("Screenshots must be an image.", { kind: "error" });
+    $("drop").classList.add("is-error");
+    setTimeout(() => $("drop").classList.remove("is-error"), 1200);
+    return;
+  }
+  if (many) Supercut.toast("Only one screenshot is used per video; using the first.");
+  if (chosenUrl) URL.revokeObjectURL(chosenUrl);
+  chosenFile = file;
+  chosenUrl = URL.createObjectURL(file);
+  useOwnFile = true;
+  // keep the hidden input in step where the browser allows assigning files
+  try { const dt = new DataTransfer(); dt.items.add(file); $("file").files = dt.files; } catch { /* chosenFile is the truth */ }
+  $("form-error").hidden = true;
+  renderPrefill();
+  Supercut.announce("Screenshot added.");
+}
+function clearOwnFile() {
+  if (chosenUrl) URL.revokeObjectURL(chosenUrl);
+  chosenFile = chosenUrl = null;
+  useOwnFile = false;
+  $("file").value = "";
+}
+
 $("file").addEventListener("change", () => {
-  if ($("file").files[0]) { useOwnFile = true; renderPrefill(); }
+  const f = $("file").files[0];
+  if (f) setFile(f);
 });
 $("reuse").addEventListener("click", e => {
   e.preventDefault();
-  useOwnFile = false;
-  $("file").value = "";
+  clearOwnFile();
   renderPrefill();
 });
+
+// Drop anywhere on the page while the form is showing; the zone lights up
+// as soon as a file is dragged over the window. Dropping outside it would
+// otherwise make the browser navigate away to the image.
+let dragDepth = 0;
+const dragHasFiles = e => [...(e.dataTransfer?.types || [])].includes("Files");
+document.addEventListener("dragenter", e => {
+  if (!dragHasFiles(e) || $("form-card").hidden) return;
+  dragDepth++;
+  $("drop").classList.add("is-dragover");
+});
+document.addEventListener("dragleave", e => {
+  if (!dragHasFiles(e)) return;
+  if (--dragDepth <= 0) { dragDepth = 0; $("drop").classList.remove("is-dragover"); }
+});
+document.addEventListener("dragover", e => { if (dragHasFiles(e)) e.preventDefault(); });
+document.addEventListener("drop", e => {
+  if (!dragHasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  $("drop").classList.remove("is-dragover");
+  if ($("form-card").hidden) return;
+  const files = [...e.dataTransfer.files];
+  const images = files.filter(isImage);
+  if (!images.length) setFile(files[0]);  // refused, with the reason
+  else setFile(images[0], { many: images.length > 1 });
+});
+
+// Paste an image anywhere while the form is showing, including with the
+// caret in the URL field: an image becomes the screenshot and the field's
+// text is untouched (preventDefault only when an image was taken). Pasting
+// text never touches the screenshot.
+document.addEventListener("paste", e => {
+  if ($("form-card").hidden || !e.clipboardData) return;
+  const files = [...e.clipboardData.items].filter(i => i.kind === "file").map(i => i.getAsFile()).filter(Boolean);
+  if (!files.length) return;
+  const images = files.filter(isImage);
+  e.preventDefault();
+  if (!images.length) setFile(files[0]);
+  else setFile(images[0], { many: images.length > 1 });
+});
+
+const PASTE_KEY = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘V" : "Ctrl+V";
+function renderDrop(kind, opts = {}) {
+  const box = $("drop-content");
+  const key = kind + "|" + (opts.src || "") + "|" + (opts.label || "");
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  box.replaceChildren();
+  box.className = "drop-content" + (kind === "empty" ? " drop-empty" : "");
+  $("drop").classList.toggle("has-file", kind !== "empty");
+  if (kind === "empty") {
+    box.appendChild(icon("image"));
+    const line = el("span");
+    line.append(el("strong", null, "Drop, paste or click to add a screenshot"));
+    box.appendChild(line);
+    const sub = el("span", "xsmall");
+    sub.append("A clear shot of their face · paste with ");
+    sub.append(el("kbd", null, PASTE_KEY));
+    box.appendChild(sub);
+    $("drop-text").textContent = "Add a screenshot of the person: click to choose, drop, or paste an image.";
+    return;
+  }
+  box.appendChild(Supercut.faceChip(opts.src, null, { reused: kind === "reused" }));
+  const text = el("span", "drop-chip-text");
+  text.appendChild(el("span", "face-chip-kicker", "Looking for"));
+  const name = el("span", "truncate small" + (kind === "reused" ? " muted" : ""), opts.label);
+  text.appendChild(name);
+  box.appendChild(text);
+  box.appendChild(el("span", "drop-change", "Change"));
+  $("drop-text").textContent = `Screenshot: ${opts.label}. Activate to choose a different one.`;
+}
 
 function renderPrefill() {
   const p = session && session.prefill;
   const reusing = p && !useOwnFile;
-  $("reuse-row").classList.toggle("hidden", !(p && useOwnFile));
-  if (reusing) {
-    $("drop").classList.add("has-file");
+  $("reuse-row").hidden = !(p && useOwnFile);
+  if (useOwnFile && chosenFile) {
+    renderDrop("own", { src: chosenUrl, label: chosenFile.name || "Pasted image" });
+  } else if (reusing) {
     const prev = session.videos.find(v => v.id === p.from_video);
-    $("drop-text").textContent = `Same screenshot as video ${prev ? prev.display_index : ""}` +
-      " — click to use a different one";
-    $("preview").src = `/api/sessions/${sid}/videos/${p.from_video}/screenshot`;
-    $("preview").classList.remove("hidden");
-  } else if (!useOwnFile) {
-    $("drop").classList.remove("has-file");
-    $("drop-text").textContent = "Click to choose an image (a clear shot of their face)";
-    $("preview").classList.add("hidden");
+    renderDrop("reused", { src: `/api/sessions/${sid}/videos/${p.from_video}/screenshot`,
+                          label: `Same as video ${prev ? prev.display_index : ""}` });
+  } else {
+    renderDrop("empty");
   }
   // Tuning is copied once per new source video, so a poll never overwrites
   // what the user is in the middle of adjusting.
@@ -396,8 +609,9 @@ function renderPrefill() {
 
 $("form").addEventListener("submit", async e => {
   e.preventDefault();
-  $("form-error").classList.add("hidden");
-  const f = useOwnFile ? $("file").files[0] : null;
+  $("form-error").hidden = true;
+  if (!$("url").value.trim()) { showFormError("Please paste a YouTube link."); $("url").focus(); return; }
+  const f = useOwnFile ? chosenFile : null;
   const p = session && session.prefill;
   if (!f && !p) { showFormError("Please choose a screenshot image."); return; }
   const body = new FormData();
@@ -414,8 +628,9 @@ $("form").addEventListener("submit", async e => {
     if (!res.ok) throw new Error((await res.json()).detail || "Could not add the video.");
     // only the link is cleared; screenshot and tuning carry over (FR-007)
     $("url").value = "";
-    useOwnFile = false;
-    $("file").value = "";
+    showLinkPreview();
+    clearOwnFile();
+    Supercut.toast("Added to the queue.", { kind: "success" });
     await poll();
   } catch (err) {
     showFormError(err.message);
@@ -428,22 +643,21 @@ $("form").addEventListener("submit", async e => {
 $("new-session").addEventListener("click", async () => {
   const res = await fetch("/api/sessions", { method: "POST" });
   if (res.ok) location.href = `/session/${(await res.json()).id}`;
+  else Supercut.toast("Couldn't create a session.", { kind: "error" });
 });
 $("discard").addEventListener("click", async () => {
   const res = await fetch(`/api/sessions/${sid}`, { method: "DELETE" });
   if (res.ok) location.href = "/";
-  else showFormError((await res.json()).detail || "Could not discard the session.");
+  else await failToast(res, "Could not discard the session.");
 });
 
 // Puts every failed video back in line; an ended session reopens and, once
 // they finish, joins again from all its clips into a replacement reel.
 async function retryFailed() {
-  $("form-error").classList.add("hidden");
+  $("ended-error").hidden = true;
   const res = await fetch(`/api/sessions/${sid}/retry`, { method: "POST" });
-  if (!res.ok) {
-    $("ended-error").textContent = (await res.json()).detail || "Could not retry.";
-    $("ended-error").classList.remove("hidden");
-  }
+  if (!res.ok) await failToast(res, "Could not retry.");
+  else Supercut.toast("Failed videos are back in the queue.", { kind: "success" });
   await poll();
 }
 $("retry-ended").addEventListener("click", retryFailed);
@@ -451,80 +665,216 @@ $("retry-open").addEventListener("click", retryFailed);
 
 async function removeVideo(vid) {
   const res = await fetch(`/api/sessions/${sid}/videos/${vid}`, { method: "DELETE" });
-  if (!res.ok) showFormError((await res.json()).detail || "Could not remove the video.");
+  if (!res.ok) await failToast(res, "Could not remove the video.");
   await poll();
 }
 
-function videoRow(v) {
-  const li = el("li", v.state);
-  const head = el("div", "q-head");
-  head.appendChild(el("span", "q-num", v.display_index ? `${v.display_index}.` : "–"));
-  head.appendChild(el("span", "q-title", v.title || shortUrl(v.url)));
-  const label = { waiting: `#${v.line_position} in line`, processing: "processing",
-                  done: "done", failed: "failed", removed: "removed" }[v.state];
-  head.appendChild(el("span", `q-state ${v.state}`, label));
-  li.appendChild(head);
+/* ---- queue rows: patched in place, so an unchanged row keeps its DOM (and
+   its images) and a changed one can show the change ---------------------- */
+
+const STATE_LABELS = { processing: "Processing", done: "Done", failed: "Failed", removed: "Removed" };
+function stateBadge(v) {
+  if (v.state === "waiting" && v.network_wait) return badge("network", "Waiting for YouTube");
+  if (v.state === "waiting") return badge("waiting", `#${v.line_position} in line`);
+  return badge(v.state, STATE_LABELS[v.state] || v.state);
+}
+
+function rowDetails(v) {
+  const out = [];
   if (v.state === "waiting" && v.network_wait) {
-    li.appendChild(el("div", "q-detail failed", v.network_wait));
+    // FR-030: its own visual state, distinct from progress and from failure
+    const d = el("div", "q-detail");
+    d.appendChild(Supercut.stageTrack(trackArgs(v)));
+    out.push(d);
   }
   if (v.state === "waiting" && v.ahead_other) {
     // the whole app runs one video at a time, oldest session first, and never
     // interrupts the video in progress -- so this session can sit idle behind
     // an older session's videos, or behind a newer session's running one
-    li.appendChild(el("div", "q-detail",
+    out.push(el("div", "q-detail",
       `Waiting on ${v.ahead_other} item(s) from other sessions` +
       (v.ahead_own ? ` and ${v.ahead_own} from this session.` : ".")));
   }
   if (v.state === "processing") {
-    li.appendChild(el("div", "q-detail", `${stageNames[v.stage] || "Working"} — ${v.message || ""}`));
-    const track = el("div", "bar-track"), fill = el("div", "bar-fill");
-    fill.style.width = (v.progress || 0) + "%";
-    track.appendChild(fill);
-    li.appendChild(track);
+    const d = el("div", "q-detail");
+    d.appendChild(Supercut.stageTrack(trackArgs(v)));
+    out.push(d);
   } else if (v.state === "done") {
     const r = v.result || {};
     const d = el("div", "q-detail", `${r.clip_count} clip(s) · ${r.output_duration}s of footage · ${r.resolution} · `);
     const a = el("a", null, "View reel");
     a.href = `/archive#${v.id}`;
     d.appendChild(a);
-    li.appendChild(d);
+    out.push(d);
   } else if (v.state === "failed") {
-    const d = el("div", "q-detail failed", v.error || "Failed.");
+    const d = el("div", "q-detail is-failed", v.error || "Failed.");
     // the full tool output, for whoever is debugging, without filling the page
     if (v.error_detail) d.title = v.error_detail;
-    li.appendChild(d);
+    out.push(d);
   } else if (v.state === "waiting" && session.state === "open") {
     const d = el("div", "q-detail");
     // only waiting videos can be removed (FR-012/013); no confirm dialog,
     // matching how little is lost -- it was never started
-    const btn = el("button", "small-btn", "Remove");
+    const btn = el("button", "btn btn-quiet btn-sm");
     btn.type = "button";
+    btn.appendChild(icon("x", "icon-sm"));
+    btn.appendChild(el("span", null, "Remove"));
     btn.addEventListener("click", () => removeVideo(v.id));
     d.appendChild(btn);
-    li.appendChild(d);
+    out.push(d);
   }
+  return out;
+}
+
+function trackArgs(v) {
+  const network = v.state === "waiting" && !!v.network_wait;
+  return { stage: network ? "network" : v.stage, progress: v.progress, elapsed_s: v.elapsed_s,
+           zoom: !!(v.tuning && v.tuning.zoom), network,
+           message: network ? v.network_wait : `${stageNames[v.stage] || "Working"} — ${v.message || ""}` };
+}
+// What a row shows, minus the per-second fields (progress, message, elapsed,
+// the network countdown), which are patched without a rebuild. Equal
+// signatures mean the row is left alone.
+function rowSignature(v) {
+  return JSON.stringify([v.state, v.display_index, v.title, v.url, v.line_position, !!v.network_wait,
+    v.ahead_own, v.ahead_other, v.error, v.result && v.result.clip_count, session.state]);
+}
+
+function buildRow(v) {
+  const li = el("li", `q-row is-${v.state}`);
+  li.dataset.vid = v.id;
+  if (v.state === "processing") li.dataset.stage = Supercut.trackStage(v.stage);
+  const main = el("div", "q-main");
+  const thumb = el("div", "q-thumb");
+  thumb.setAttribute("aria-hidden", "true");
+  thumb.appendChild(Supercut.thumbImg(v.url));
+  if (v.state !== "removed") {
+    const chip = Supercut.faceChip(`/api/sessions/${sid}/videos/${v.id}/screenshot`, null);
+    chip.querySelector("img").addEventListener("error", () => chip.remove(), { once: true });
+    thumb.appendChild(chip);
+  }
+  main.appendChild(thumb);
+  const bodyEl = el("div", "q-body");
+  main.appendChild(bodyEl);
+  li.appendChild(main);
+  const head = el("div", "q-head");
+  head.appendChild(el("span", "q-num", v.display_index ? `${v.display_index}.` : "–"));
+  const title = el("span", "q-title truncate", v.title || shortUrl(v.url));
+  title.title = v.title || v.url || "";
+  head.appendChild(title);
+  head.appendChild(stateBadge(v));
+  bodyEl.appendChild(head);
+  for (const d of rowDetails(v)) bodyEl.appendChild(d);
   return li;
 }
 
+const rows = new Map();   // video id -> { li, sig, state }
+let firstQueueRender = true;
+function renderQueue(s) {
+  const q = $("queue");
+  const seen = new Set();
+  s.videos.forEach((v, i) => {
+    seen.add(v.id);
+    const prev = rows.get(v.id);
+    const sig = rowSignature(v);
+    let li;
+    if (prev && prev.sig === sig) {
+      li = prev.li;
+      const track = li.querySelector(".stage-track");   // the per-second fields, in place
+      if (track) {
+        const prevStage = li.dataset.stage, stage = Supercut.trackStage(v.stage);
+        track.update(trackArgs(v));
+        // FR-015: announce the stage change, never the percentage
+        if (v.state === "processing" && prevStage && prevStage !== stage) {
+          Supercut.announce(`Video ${v.display_index}: ${Supercut.STAGE_LABELS[stage] || stage}.`);
+        }
+        li.dataset.stage = stage;
+      }
+    } else {
+      li = buildRow(v);
+      if (prev) {
+        prev.li.replaceWith(li);
+        if (prev.state !== v.state) {
+          li.classList.add("is-changed");
+          announceVideo(v);
+        }
+      } else if (!firstQueueRender) {
+        li.classList.add("is-new");
+      }
+      rows.set(v.id, { li, sig, state: v.state });
+    }
+    // keep DOM order equal to queue order (moving an existing node is cheap)
+    if (q.children[i] !== li) q.insertBefore(li, q.children[i] || null);
+  });
+  for (const [id, r] of rows) if (!seen.has(id)) { r.li.remove(); rows.delete(id); }
+  firstQueueRender = false;
+}
+
+// FR-015: one announcement per state change, never per percentage
+function announceVideo(v) {
+  const n = v.display_index ? `Video ${v.display_index}` : "A video";
+  const r = v.result || {};
+  const text = {
+    processing: `${n} is processing.`,
+    done: `${n} done: ${r.clip_count} clip(s).`,
+    failed: `${n} failed: ${v.error || "unknown error"}.`,
+    removed: `${n} removed.`,
+    waiting: v.network_wait ? `${n} is waiting for YouTube.` : `${n} is back in line.`,
+  }[v.state];
+  if (text) Supercut.announce(text);
+}
+let lastSessionState = null;
+function announceSession(s) {
+  if (lastSessionState && lastSessionState !== s.state) {
+    const text = {
+      joining: "All videos finished. Joining the session's reels.",
+      finished: "Your joined reel is ready.",
+      nothing_to_join: "Session finished. Nothing to join.",
+      join_failed: "Joining failed.",
+      open: "Session reopened.",
+    }[s.state];
+    if (text) Supercut.announce(text);
+  }
+  lastSessionState = s.state;
+}
+
+function statChip(value, label) {
+  const c = el("span", "stat-chip");
+  c.append(el("strong", null, value), el("span", null, label));
+  return c;
+}
+const ENDED_ICONS = { finished: "sparkles", nothing_to_join: "info", join_failed: "alert-triangle" };
 function renderEnded(s) {
   const card = $("ended-card");
-  card.classList.remove("hidden");
+  card.hidden = false;
   const r = s.result || {};
-  $("ended-error").classList.add("hidden");
-  if (s.state === "finished") {
-    $("ended-title").textContent = "Your joined reel";
+  const finished = s.state === "finished";
+  card.classList.toggle("is-plain", !finished);
+  $("ended-icon").querySelector("use").setAttribute("href", `/static/icons.svg#i-${ENDED_ICONS[s.state] || "info"}`);
+  $("ended-error").hidden = true;
+  $("stat-chips").hidden = !finished;
+  $("copy-link").hidden = !finished;
+  $("share").hidden = !(finished && Supercut.canShare(reelLink()));
+  if (finished) {
+    $("ended-title").textContent = "Your reel is ready";
     if (!playerSrcSet) {
       playerSrcSet = true;
       // the query string changes when a retry rebuilds the reel, so the
       // browser fetches the new file instead of replaying a cached one
       $("player").src = `/api/sessions/${sid}/output?v=${encodeURIComponent(s.completed_at)}`;
-      $("player").classList.remove("hidden");
+      $("player").hidden = false;
       $("download").href = `/api/sessions/${sid}/output`;
-      $("download").download = `facereel-session-${sid}.mp4`;
-      $("download").classList.remove("hidden");
+      $("download").download = `supercut-session-${sid}.mp4`;
+      $("download").hidden = false;
     }
-    $("ended-stats").textContent = `${r.joined_count} video(s) joined · ${r.clip_count} clip(s) · ` +
-      `${r.output_duration}s · ${r.resolution}`;
+    attachClips(s);
+    $("stat-chips").replaceChildren(
+      statChip(Supercut.fmtDuration(r.output_duration), "duration"),
+      statChip(String(r.clip_count), r.clip_count === 1 ? "clip" : "clips"),
+      statChip(String(r.joined_count), r.joined_count === 1 ? "video joined" : "videos joined"),
+      statChip(r.resolution || "–", "resolution"));
+    $("ended-stats").textContent = "";
+    maybeCelebrate(s);
   } else if (s.state === "nothing_to_join") {
     $("ended-title").textContent = "Session finished — nothing to join";
     $("ended-stats").textContent = "No video in this session produced any footage.";
@@ -532,79 +882,156 @@ function renderEnded(s) {
     $("ended-title").textContent = "Joining failed";
     $("ended-stats").textContent = "Each video's own reel is still in the archive.";
     $("ended-error").textContent = s.error || "";
-    $("ended-error").classList.remove("hidden");
+    $("ended-error").hidden = !s.error;
   }
   // The queue below names each video that didn't make it and why (US2
   // scenario 3), so the summary only counts them rather than repeating it.
   const missed = (r.videos || []).filter(v => v.state !== "joined").length;
   if (missed) {
-    $("ended-stats").textContent += ` · ${missed} video(s) not included — see the queue below`;
+    $("ended-stats").textContent = `${$("ended-stats").textContent ? $("ended-stats").textContent + " · " : ""}` +
+      `${missed} video(s) not included — see the queue below`;
   }
 }
+
+// FR-032: once per finished reel, keyed by completion (research D12), so a
+// retry that rebuilds the reel earns its own. Skipped if the bar's "ready"
+// notice for this completion was already dismissed (spec edge case).
+// Only for a reel finished in the last 24 hours (chosen): without it, every
+// session that finished before this feature shipped would set off confetti
+// the first time it was reopened.
+const CELEBRATE_WITHIN_MS = 24 * 3600 * 1000;
+function maybeCelebrate(s) {
+  const key = `${sid}@${s.completed_at}`;
+  if (Supercut.celebrated.has(key)) return;
+  if (!s.completed_at || Date.now() - new Date(s.completed_at).getTime() > CELEBRATE_WITHIN_MS) return;
+  Supercut.celebrated.add(key);
+  if (window.SupercutProgress && SupercutProgress.isAcknowledged(key)) return;
+  Supercut.celebrate($("ended-card"));
+}
+
+// FR-042: the clip strip, from the reel's archive entry -- fetched once per
+// completion, not with every poll, and dropped when a retry reopens the
+// session (the rebuilt reel gets its own).
+let clipsFor = null, clipStrip = null;
+function attachClips(s) {
+  const key = `${sid}@${s.completed_at}`;
+  if (clipsFor === key) return;
+  clipsFor = key;
+  fetch(`/api/archive/${sid}`).then(r => r.ok ? r.json() : null).catch(() => null).then(entry => {
+    if (clipsFor !== key || !entry) return;
+    if (clipStrip) clipStrip.destroy();
+    clipStrip = SupercutPlayer.attach($("player"), entry);
+  });
+}
+function detachClips() {
+  if (clipStrip) clipStrip.destroy();
+  clipStrip = null;
+  clipsFor = null;
+}
+
+function reelLink() { return `${location.origin}/archive#${sid}`; }
+$("copy-link").addEventListener("click", async () => {
+  const ok = await Supercut.copyText(reelLink());
+  Supercut.toast(ok ? "Link to the reel copied." : "Couldn't copy the link.", { kind: ok ? "success" : "error" });
+});
+$("share").addEventListener("click", () => Supercut.share({ title: session && session.title || "Supercut reel", url: reelLink() }));
+
 // the joined reel was deleted from the archive after the session finished
 $("player").addEventListener("error", () => {
   if (!$("player").getAttribute("src")) return;
-  $("player").classList.add("hidden");
-  $("download").classList.add("hidden");
+  $("player").hidden = true;
+  $("download").hidden = true;
   $("ended-error").textContent = "The joined reel was deleted from the archive.";
-  $("ended-error").classList.remove("hidden");
+  $("ended-error").hidden = false;
 });
 
 function render(s) {
-  $("missing").classList.add("hidden");
-  $("sid-row").classList.remove("hidden");
-  $("queue-card").classList.remove("hidden");
+  $("skeleton").hidden = true;
+  $("missing").hidden = true;
+  $("sid-row").hidden = false;
+  $("session-grid").hidden = false;
+  $("queue-card").hidden = false;
+  const title = s.title || (s.videos.length ? "Session" : "New session");
+  $("s-title").textContent = title;
+  $("s-title").title = title;
+  Supercut.setTitle(`${title} · Supercut`);
+  announceSession(s);
   const open = s.state === "open";
-  $("form-card").classList.toggle("hidden", !open);
-  $("warning").classList.toggle("hidden", !s.will_complete_after_current);
-  $("join-card").classList.toggle("hidden", s.state !== "joining");
+  $("form-card").hidden = !open;
+  $("session-grid").classList.toggle("is-closed", !open);
+  $("warning").hidden = !s.will_complete_after_current;
+  $("join-card").hidden = s.state !== "joining";
   if (s.state === "joining") {
     const j = s.join || { progress: 0, message: "Waiting to start..." };
     $("join-bar").style.width = (j.progress || 0) + "%";
     $("join-msg").textContent = j.message || "";
+    $("join-clock").textContent = j.elapsed_s != null ? Supercut.fmtDuration(j.elapsed_s) : "";
+    if (!$("join-badge").firstChild) $("join-badge").appendChild(badge("joining", "Joining"));
   }
   if (["finished", "nothing_to_join", "join_failed"].includes(s.state)) renderEnded(s);
   else {
-    $("ended-card").classList.add("hidden");
+    $("ended-card").hidden = true;
     if (playerSrcSet) {  // reopened by a retry: load the rebuilt reel when it lands
       playerSrcSet = false;
+      detachClips();
       $("player").pause();
       $("player").removeAttribute("src");
-      $("player").classList.add("hidden");
-      $("download").classList.add("hidden");
+      $("player").hidden = true;
+      $("download").hidden = true;
     }
   }
   const failedCount = s.videos.filter(v => v.state === "failed").length;
   const retryLabel = `Retry ${failedCount} failed video${failedCount === 1 ? "" : "s"}`;
   $("retry-ended").textContent = s.state === "finished" ? `${retryLabel} and rebuild the reel` : retryLabel;
-  $("retry-ended").classList.toggle("hidden", !failedCount);
+  $("retry-ended").hidden = !failedCount;
   $("retry-open").textContent = retryLabel;
-  $("retry-open").classList.toggle("hidden", !(failedCount && s.state === "open"));
+  $("retry-open").hidden = !(failedCount && s.state === "open");
 
   const atLimit = s.total >= s.limit;
   $("slots").textContent = atLimit
     ? `This session is full (${s.limit} videos). Remove a waiting video to make room.`
     : `${s.total} of ${s.limit} videos in this session.`;
+  $("queue-count").textContent = s.videos.length ? `${s.total} of ${s.limit}` : "";
   $("go").disabled = submitting || atLimit;
   renderPrefill();
 
-  $("empty-queue").classList.toggle("hidden", s.videos.length > 0);
-  $("discard").classList.toggle("hidden", s.videos.length > 0);
-  const q = $("queue");
-  q.innerHTML = "";
-  for (const v of s.videos) q.appendChild(videoRow(v));
+  const empty = s.videos.length === 0;
+  $("empty-queue").hidden = !empty;
+  if (empty && !$("empty-queue").firstChild) {
+    $("empty-queue").appendChild(Supercut.emptyState({
+      art: "sessions", title: "No videos yet",
+      body: "Add the first one — it starts processing straight away.",
+    }));
+  }
+  $("discard").hidden = !empty;
+  renderQueue(s);
+  if (handoffFocus && open) { handoffFocus = false; $("drop").focus(); }
+  // FR-033: the one-time notification offer, once there's something to wait
+  // for. notify.offer() renders nothing once it's been answered, or where
+  // notifications can't work (plain HTTP, research D9).
+  if (!notifyOffered && s.videos.length && open) { notifyOffered = true; Supercut.notify.offer($("notify-slot")); }
+}
+
+function showMissing() {
+  session = null;
+  for (const id of ["session-grid", "warning", "join-card", "ended-card", "sid-row", "skeleton"])
+    $(id).hidden = true;
+  $("s-title").textContent = "Session not found";
+  Supercut.setTitle("Session not found · Supercut");
+  if (!$("missing").firstChild) {
+    $("missing").appendChild(Supercut.emptyState({
+      art: "search", title: "This session doesn't exist",
+      body: "It may have been discarded, or the link is incomplete.",
+      action: { label: "Back to all sessions", href: "/", icon: "arrow-left" },
+    }));
+  }
+  $("missing").hidden = false;
 }
 
 async function poll() {
   try {
     const res = await fetch(`/api/sessions/${sid}`);
-    if (res.status === 404 || res.status === 400) {
-      session = null;
-      for (const id of ["form-card", "queue-card", "warning", "join-card", "ended-card", "sid-row"])
-        $(id).classList.add("hidden");
-      $("missing").classList.remove("hidden");
-      return;
-    }
+    if (res.status === 404 || res.status === 400) { showMissing(); return; }
     if (!res.ok) return;
     session = await res.json();
     render(session);

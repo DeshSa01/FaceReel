@@ -21,6 +21,32 @@ import pipeline
 import sessions
 
 
+def session_clips(joined, offsets, total):
+    """The session reel's clip map (004 data-model section 1), as a pure
+    function so it can be tested without ffmpeg (research D18).
+
+    joined: one dict per joined video, in join order, with "vid", "title" and
+    "clips" (that video's own clip map, or None for a reel made before 004).
+    offsets: where each joined video starts in the session reel.
+    total: the session reel's duration, which closes the last stretch.
+
+    A video with a map contributes its clips shifted by its offset. One
+    without contributes a single clip spanning its whole stretch, marked
+    whole, so the strip can still say which video each stretch came from.
+    """
+    out = []
+    for i, (v, start) in enumerate(zip(joined, offsets)):
+        end = offsets[i + 1] if i + 1 < len(offsets) else total
+        tag = {"video": v["vid"], "index": i + 1, "title": v.get("title")}
+        if v.get("clips"):
+            for c in v["clips"]:
+                out.append({"start": round(start + c["start"], 2),
+                            "end": round(min(start + c["end"], end), 2), **tag})
+        else:
+            out.append({"start": round(start, 2), "end": round(end, 2), **tag, "whole": True})
+    return out
+
+
 class Runner:
     def __init__(self, store, jobs_dir):
         self.store = store
@@ -32,7 +58,7 @@ class Runner:
         # clean_jobs_dir() isn't at module scope: importing must have no side
         # effects.
         if self._thread is None:
-            self._thread = threading.Thread(target=self._loop, name="facereel-runner", daemon=True)
+            self._thread = threading.Thread(target=self._loop, name="supercut-runner", daemon=True)
             self._thread.start()
 
     def _loop(self):
@@ -120,12 +146,16 @@ class Runner:
             self.store.mark_failed(sid, vid, f"Reel was generated but could not be saved: {e}")
             return
 
+        # clips stays in the archive sidecar only: session.json duplicating
+        # archive data is what a later deletion would then contradict
+        # (004 data-model section 1)
         self.store.mark_done(sid, vid, result["title"],
-                             {k: v for k, v in result.items() if k not in ("output", "title")})
+                             {k: v for k, v in result.items() if k not in ("output", "title", "clips")})
 
     def _run_join(self, sid):
         videos = self.store.join_plan(sid)
         inputs, summary, clip_count = [], [], 0
+        joined_meta = []   # per joined video, for the session clip map
         for v in videos:
             item = {"vid": v["id"], "title": v["title"], "url": v["url"]}
             if v["state"] == sessions.DONE:
@@ -133,6 +163,7 @@ class Runner:
                 path = os.path.join(archive.entry_dir(v["id"]), entry["video"]) if entry else None
                 if path and os.path.exists(path):
                     inputs.append(path)
+                    joined_meta.append({"vid": v["id"], "title": v["title"], "clips": entry.get("clips")})
                     clip_count += (v["result"] or {}).get("clip_count") or 0
                     summary.append({**item, "state": "joined"})
                 else:
@@ -158,6 +189,7 @@ class Runner:
             archive.archive_session(sid, joined["output"], {
                 "clip_count": clip_count, "output_duration": joined["output_duration"],
                 "resolution": joined["resolution"], "videos": summary,
+                "clips": session_clips(joined_meta, joined["offsets"], joined["output_duration"]),
             })
             self.store.mark_join_result(sid, sessions.FINISHED, result={
                 "archive_id": sid, "output_duration": joined["output_duration"],

@@ -1,4 +1,4 @@
-# FaceReel — Handoff
+# Supercut (formerly FaceReel) — Handoff
 
 Context document for resuming work in a fresh session. Covers what the app is,
 how it works, why it works that way, and what's still open.
@@ -40,7 +40,7 @@ Form options: three clip-boundary sliders with a "Use recommended" preset
 | Face recognize | OpenCV `FaceRecognizerSF` (SFace) | `models/sface.onnx`, 128-d embeddings |
 | Video | `ffmpeg` / `ffprobe` (Homebrew), `yt-dlp` | |
 | JS runtime | `deno` (Homebrew locally, pinned 2.9.5 in the image) | **Required** — YouTube 403s without it (§14) |
-| Frontend | Single static HTML file, vanilla JS | `static/index.html` |
+| Frontend | Three static HTML pages, vanilla JS, no build step | `static/*.html`; shared `static/css/supercut.css`, `static/js/shell.js` |
 | Container | `python:3.14-slim` + ffmpeg + deno | `Dockerfile`; deps pinned as a full closure |
 | Registry | `ghcr.io/deshsa01/facereel` | Built by GitHub Actions on push to `main` |
 | Deployment | Portainer stack on an ACEMAGIC N95 (Proxmox) | `docker-compose.yml`; storage bind-mounted |
@@ -69,7 +69,54 @@ Models came from the [OpenCV model zoo](https://github.com/opencv/opencv_zoo)
   (`kind: video`) or a session's joined reel (`kind: session`, keyed by session id).
 - `static/index.html` — the session chooser. `static/session.html` — the
   generator form, the queue, and the joined reel. `static/archive.html` — the
-  archive. `static/progress.js` — the bottom bar on every page. Light/dark themed.
+  archive. `static/progress.js` — the bottom bar on every page.
+- `static/css/supercut.css` — the design system: every colour, size and timing
+  as a token (contrast measured by `specs/004-ui-overhaul/contrast.py`), plus
+  the shared components. `static/js/shell.js` — `window.Supercut`: toasts,
+  badges, the screen-reader announcer, copy-to-clipboard, empty states.
+  `static/icons.svg` — the icon sprite. `static/brand/` — logo, favicon and
+  home-screen icons (PNGs rendered by `tools/render-icons.sh`).
+- `youtube.py` — link previews: extracts the 11-character video id (same rules
+  as `youtubeId()` in `shell.js`) and looks the title up via YouTube's oEmbed,
+  stdlib `urllib`, 4 s timeout, in-memory LRU of 256. The server builds the
+  oEmbed URL from the validated id and **never fetches the user's URL**, so the
+  route can't be turned into a way to make the server request arbitrary
+  addresses. `GET /api/youtube/preview?url=` is only for the form's preview;
+  adding a video never consults it.
+- **Progress (004)**: `SessionStore` stamps `started` (monotonic, in-memory)
+  on the runtime entry when a video or join is picked; responses carry a
+  server-computed `elapsed_s`, so a phone with a wrong clock still shows the
+  right time. `/api/jobs/active` also carries `zoom` (for the stage track) and,
+  on terminal payloads, `completed_at`.
+- **Hidden tabs poll every 10 s** (`progress.js`), reversing 002 research D2:
+  tab-title and favicon progress and notifications only matter while the tab
+  is hidden. SSE was rejected again: each tab would hold one of HTTP/1.1's six
+  per-host connections, and the seventh tab would hang.
+- **Completion keys**: the bar's acknowledgement (and the celebration) are
+  keyed `"<session id>@<completed_at>"`, not by session id. Keyed by session,
+  a retry that rebuilt a reel was already "acknowledged", so its ready notice
+  never showed: that bug is fixed. `facereel.acknowledged` is migrated once.
+- **Secure-context features**: notifications, `navigator.share` and the
+  clipboard API exist only on HTTPS or `localhost`. The LAN deployment is
+  plain HTTP, so they are capability-gated (`Supercut.notify.available()`,
+  `canShare`, the `execCommand` copy fallback). They work on the dev machine
+  and not on the nucbox: verify against the deployment.
+- **Clip map (004 US7)**: `cut_and_stitch()` runs `ffprobe` on each cut
+  segment and returns `clips: [{start, end, source_start}]` in reel time;
+  `process_job()` drops the map if its end disagrees with the reel's probed
+  length by more than 0.05 s, rather than write wrong marks. `join_reels()`
+  returns each input's `offsets`; `runner.session_clips()` (a pure function)
+  shifts each video's clips by its offset and tags them with the video, or
+  gives a pre-004 reel one `whole` stretch. Stored only in `reel.json`
+  (never `session.json`), served by `GET /api/archive/<id>` and the listing,
+  drawn by `static/js/player.js` under the native `<video>` controls.
+  Measured on the dev Mac (M4): 38 ms per probe, 5.9% of cut-and-stitch for
+  50 clips; a nominal sum of requested lengths would have drifted 2.54 s.
+  The nucbox figure is still owed.
+- Static assets are served by one allow-listed route, `GET /static/{path}`,
+  built from the files on disk at start-up: **a new asset file needs an app
+  restart before it is served.** Errors are toasts or inline messages; no page
+  uses `alert`/`confirm`.
 - `models/` — the two ONNX files.
 - `Dockerfile`, `.dockerignore`, `docker-compose.yml`,
   `.github/workflows/docker.yml` — the container and its CI (§14).
@@ -341,7 +388,7 @@ other 0.25s is the `END_PAD` tail, which no slider touches.
 The checkbox **reflects** the sliders rather than driving them: moving any
 slider unticks it, and moving back onto the recommended values re-ticks it, so
 it can never claim "recommended" while the values disagree. Purely client-side —
-`recommended` in `static/index.html` alongside `knobs`; the API already accepts
+`recommended` in `static/session.html` alongside `knobs`; the API already accepts
 arbitrary values, so no server change was needed.
 
 `Tuning.clamped()` holds untrusted form values in range — `app.py` passes the
@@ -351,7 +398,7 @@ values are stored on each queued video in `session.json` and echoed by
 them; useful when comparing runs.
 
 Front end is a `<details open>` panel above the submit button, plus a reset
-button. The `knobs` object in `static/index.html` duplicates the three defaults
+button. The `knobs` object in `static/session.html` duplicates the three defaults
 — keep it in sync with `Tuning` if you change them.
 
 `GET /` now sends `Cache-Control: no-cache`. Without it `FileResponse` sets only
@@ -674,3 +721,47 @@ derived from conventions already in this repo, each citing its evidence. It
 deliberately does **not** mandate test-first: there is no test suite, and an
 unmet gate is just something to route around. Plans carry a Constitution Check;
 Every feature plan so far (`specs/001…003/plan.md`) passes all five.
+
+## 16. Supercut: the UI overhaul and rebrand (built 2026-10-10)
+
+Spec, plan, research and tasks: `specs/004-ui-overhaul/`. The app is now
+**Supercut**; the image, compose service, storage path and repo keep their
+`facereel` names on purpose (research D17), so the Portainer stack is unchanged.
+
+### What changed
+
+- **Design system**: `static/css/supercut.css` (tokens via `light-dark()`,
+  components), `static/js/shell.js` (`window.Supercut`), `static/js/player.js`
+  (clip strip), `static/icons.svg`, `static/brand/` (logo, favicon, icons;
+  PNGs from `tools/render-icons.sh`). No framework, no build step, no new
+  runtime dependencies.
+- **New module**: `youtube.py` (link previews; never fetches the user's URL).
+  It is listed in the Dockerfile's `COPY` line: a module missing there builds
+  an image that dies on import.
+- **New routes**: `GET /static/{path}` (allow-list), `/favicon.ico`,
+  `/manifest.webmanifest`, `/api/youtube/preview`, `GET /api/archive/{id}`.
+- **New data**: optional `clips` in `reel.json`; `elapsed_s`, `zoom`,
+  `completed_at`, `video_urls` on existing responses.
+
+### Things that will bite if changed carelessly
+
+- The inline theme script in each page's `<head>` must stay **before** the
+  stylesheet and inline, or a forced theme flashes on load. Three copies.
+- `GET /api/archive/{reel_id:path}` must stay **below** the `/video`, `/thumb`
+  and `/screenshot` routes, or it swallows them.
+- `STATIC_FILES` is built at start-up: a new asset needs a restart.
+- Hidden tabs poll every 10 s (reverses 002 D2), and the bar's acknowledgement
+  is keyed per completion (fixes retry-rebuilt reels never re-announcing).
+- Notifications, share and the clipboard API don't exist on the plain-HTTP
+  deployment; everything that uses them is gated. Test them there, not on
+  localhost.
+- The archive delete confirmation uses explicit button handlers, not
+  `<form method="dialog">`: Chrome was seen to drop the confirm dialog's
+  `close` event after the stacked viewer had been closed with Escape.
+
+### Still open
+
+- Measure the clip-map probe cost on the nucbox (dev Mac: 38 ms per clip,
+  5.9% of cut-and-stitch for 50 clips), and fill 003's `join_reels` MEASURED
+  placeholder while there.
+- The deploy-only and phone checks in `specs/004-ui-overhaul/quickstart.md`.

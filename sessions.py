@@ -393,7 +393,10 @@ class SessionStore:
         if joining:
             s = min(joining, key=lambda s: (s["completed_at"] or "", s["id"]))
             self._running_join = s["id"]
-            self._runtime[s["id"]] = {"stage": "join", "progress": 0, "message": "Preparing to join..."}
+            # "started" is in-memory on purpose: a restarted join or video
+            # starts over (003 FR-020), so its timer should too (004 D11)
+            self._runtime[s["id"]] = {"stage": "join", "progress": 0, "message": "Preparing to join...",
+                                      "started": time.monotonic()}
             return ("join", s["id"], None)
         waiting = [(self._priority(s, v), s, v) for s in self._sessions.values()
                    for v in s["videos"] if v["state"] == WAITING]
@@ -403,7 +406,8 @@ class SessionStore:
         self._backoff = None
         v["state"] = PROCESSING
         _write_session(s)
-        self._runtime[v["id"]] = {"stage": "start", "progress": 0, "message": "Starting..."}
+        self._runtime[v["id"]] = {"stage": "start", "progress": 0, "message": "Starting...",
+                                  "started": time.monotonic()}
         return ("video", s["id"], copy.deepcopy(v))
 
     def defer_for_network(self, sid, vid):
@@ -442,7 +446,19 @@ class SessionStore:
 
     def set_progress(self, key, stage, pct, message):
         with self._lock:
-            self._runtime[key] = {"stage": stage, "progress": pct, "message": message}
+            # update in place: replacing the dict would drop "started"
+            self._runtime.setdefault(key, {}).update(stage=stage, progress=pct, message=message)
+
+    @staticmethod
+    def _public_runtime(rt):
+        """A runtime entry as responses show it: elapsed_s computed here, by
+        the server's clock, so a phone whose clock is off by minutes still
+        shows the right time (004 research D11). The raw monotonic float
+        never leaves the process."""
+        out = {k: v for k, v in rt.items() if k != "started"}
+        if "started" in rt:
+            out["elapsed_s"] = int(time.monotonic() - rt["started"])
+        return out
 
     def mark_done(self, sid, vid, title, result):
         with self._lock:
@@ -558,6 +574,9 @@ class SessionStore:
                 # the title is only known once a video finishes; until then
                 # the link is what the user will recognise (FR-003)
                 "first_url": first["url"] if first else None,
+                # the home page's thumbnail strip (004 data-model section 4);
+                # derived on read, never stored
+                "video_urls": [v["url"] for v in s["videos"] if v["state"] != REMOVED][:4],
                 "counts": counts, "total": self._total(s)}
 
     def _public_video(self, s, v):
@@ -569,7 +588,8 @@ class SessionStore:
             out["error_detail"] = v["error"]
         out["display_index"] = self._display_index(s, v)
         if v["state"] == PROCESSING:
-            out.update(self._runtime.get(v["id"], {"stage": "start", "progress": 0, "message": ""}))
+            out.update(self._public_runtime(
+                self._runtime.get(v["id"], {"stage": "start", "progress": 0, "message": ""})))
         if v["state"] == WAITING and self._backoff and self._backoff["vid"] == v["id"] \
                 and self.backoff_remaining() > 0:
             out["network_wait"] = self._backoff_message()
@@ -597,8 +617,8 @@ class SessionStore:
                 "will_complete_after_current": s["state"] == OPEN and own_processing and not own_waiting,
                 "prefill": {"from_video": last["id"], "tuning": last["tuning"]} if last else None,
                 "videos": [self._public_video(s, v) for v in s["videos"]],
-                "join": (dict(self._runtime[sid]) if s["state"] == JOINING and sid in self._runtime
-                         else None),
+                "join": (self._public_runtime(self._runtime[sid])
+                         if s["state"] == JOINING and sid in self._runtime else None),
                 "result": _friendly_result(s["result"]),
                 "error": friendly_error(s["error"]),
             })
@@ -618,9 +638,12 @@ class SessionStore:
                 for v in s["videos"]:
                     if v["state"] == PROCESSING:
                         rt = self._runtime.get(v["id"], {"stage": "start", "progress": 0, "message": ""})
+                        # zoom tells the bar's stage track whether to show
+                        # the "frame" stage (004 contracts/http.md)
                         return {"id": v["id"], "kind": "video", "session_id": s["id"],
                                 "index": self._display_index(s, v), "total": self._total(s),
-                                "status": "processing", **rt}
+                                "status": "processing", "zoom": bool((v["tuning"] or {}).get("zoom")),
+                                **self._public_runtime(rt)}
             if self._backoff and self.backoff_remaining() > 0:
                 b = self._backoff
                 s = self._sessions[b["sid"]]
@@ -628,12 +651,13 @@ class SessionStore:
                 return {"id": v["id"], "kind": "video", "session_id": s["id"],
                         "index": self._display_index(s, v), "total": self._total(s),
                         "status": "processing", "stage": "network", "progress": 0,
+                        "zoom": bool((v["tuning"] or {}).get("zoom")),
                         "message": self._backoff_message()}
             if self._running_join is not None:
                 sid = self._running_join
                 rt = self._runtime.get(sid, {"stage": "join", "progress": 0, "message": ""})
                 return {"id": sid, "kind": "join", "session_id": sid, "index": None,
-                        "total": None, "status": "processing", **rt}
+                        "total": None, "status": "processing", **self._public_runtime(rt)}
             ended = [s for s in self._sessions.values() if s["state"] in ENDED]
             if not ended:
                 return None
@@ -645,5 +669,9 @@ class SessionStore:
                 status, message = "done", "No video produced footage, so there was nothing to join."
             else:
                 status, message = "error", s["error"] or "Joining failed."
+            # completed_at identifies this completion, not just the session: a
+            # retry re-joins under the same id with a new completed_at, and is
+            # a new completion to announce (004 data-model section 3)
             return {"id": s["id"], "kind": "session", "session_id": s["id"],
-                    "state": s["state"], "status": status, "message": message}
+                    "state": s["state"], "status": status, "message": message,
+                    "completed_at": s["completed_at"]}

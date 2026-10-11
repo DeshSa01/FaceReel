@@ -11,10 +11,47 @@ from fastapi.responses import FileResponse
 import archive
 import pipeline
 import sessions
+import youtube
 from runner import Runner
 
 BASE_DIR = os.path.dirname(__file__)
 JOBS_DIR = os.path.join(BASE_DIR, "storage", "jobs")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+
+# What GET /static/{path} may serve: published path -> absolute file. Empty at
+# import and filled by load_static_files() in lifespan(), because module scope
+# must stay inert (see the comment above `store`). Built from what is on disk
+# rather than from the request, so a URL path is only ever a dictionary key and
+# is never joined onto the filesystem (constitution Principle V: validate,
+# don't sanitise). The .html pages are deliberately absent: they have their
+# own routes. A file added after start-up needs a restart to be served.
+STATIC_FILES = {}
+STATIC_DIRS = ("css", "js", "brand")
+STATIC_TOP = ("progress.js", "icons.svg", "manifest.webmanifest")
+STATIC_TYPES = {
+    ".css": "text/css", ".js": "application/javascript", ".svg": "image/svg+xml",
+    ".png": "image/png", ".webmanifest": "application/manifest+json",
+}
+
+
+def load_static_files():
+    """Rebuild STATIC_FILES from static/ (research D14). Returns the count."""
+    found = {}
+    for sub in STATIC_DIRS:
+        root = os.path.join(STATIC_DIR, sub)
+        if not os.path.isdir(root):
+            continue
+        for name in os.listdir(root):
+            full = os.path.join(root, name)
+            if os.path.isfile(full) and os.path.splitext(name)[1] in STATIC_TYPES:
+                found[f"{sub}/{name}"] = full
+    for name in STATIC_TOP:
+        full = os.path.join(STATIC_DIR, name)
+        if os.path.isfile(full):
+            found[name] = full
+    STATIC_FILES.clear()
+    STATIC_FILES.update(found)
+    return len(found)
 
 
 def clean_jobs_dir(path=JOBS_DIR):
@@ -44,6 +81,7 @@ async def lifespan(_app):
     print(f"Cleared {removed} orphaned job folder(s) from {JOBS_DIR}")
     archive.ensure_archive_dir()
     sessions.ensure_sessions_dir()
+    load_static_files()
     store.load()
     # Order matters: recovery reconciles interrupted work against the archive
     # (research D3) and must finish before the runner can pick anything.
@@ -52,7 +90,7 @@ async def lifespan(_app):
     yield
 
 
-app = FastAPI(title="FaceReel", lifespan=lifespan)
+app = FastAPI(title="Supercut", lifespan=lifespan)
 
 
 def _require_id(value, what="id"):
@@ -143,6 +181,18 @@ def get_video_screenshot(sid: str, vid: str):
     return FileResponse(_session_call(store.screenshot_path, sid, vid))
 
 
+@app.get("/api/youtube/preview")
+def youtube_preview(url: str = ""):
+    # A plain def, not async: FastAPI runs it in its threadpool, so the
+    # blocking oEmbed fetch (up to youtube.TIMEOUT_SECONDS) never stalls the
+    # event loop that every poll goes through. Never consulted by add_video:
+    # the server accepts exactly the links it accepted before (FR-025).
+    vid = youtube.video_id(url)
+    if vid is None:
+        raise HTTPException(400, "Not a YouTube video link.")
+    return youtube.preview(vid)
+
+
 @app.get("/api/sessions/{sid}/output")
 def get_session_output(sid: str):
     _require_id(sid, "session id")
@@ -175,13 +225,33 @@ def session_page(sid: str):
                         headers={"Cache-Control": "no-cache"})
 
 
-@app.get("/static/progress.js")
-def progress_js():
+@app.get("/static/{path:path}")
+def static_file(path: str):
     # Same staleness hazard as index()/archive_page(), and more exposed: a
-    # stale copy of this file against a current app.py produces a bar that
-    # silently stops working after a redeploy, with nothing else looking wrong.
-    return FileResponse(os.path.join(BASE_DIR, "static", "progress.js"),
-                        media_type="application/javascript",
+    # stale copy of a script or stylesheet against a current app.py produces a
+    # page that silently half-works after a redeploy, with nothing else looking
+    # wrong. Hence no-cache (revalidate, 304 when unchanged) on every asset,
+    # and no StaticFiles mount, which sends no Cache-Control at all.
+    full = STATIC_FILES.get(path)
+    if full is None:
+        raise HTTPException(404, "Not found.")
+    return FileResponse(full, media_type=STATIC_TYPES[os.path.splitext(full)[1]],
+                        headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/favicon.ico")
+def favicon():
+    # Browsers request /favicon.ico on their own initiative, whatever the
+    # page's <link rel="icon"> says; answer with the 32px PNG (research D6).
+    return FileResponse(os.path.join(STATIC_DIR, "brand", "favicon-32.png"),
+                        media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/manifest.webmanifest")
+def manifest():
+    # Also at /static/manifest.webmanifest; some installers look at the root.
+    return FileResponse(os.path.join(STATIC_DIR, "manifest.webmanifest"),
+                        media_type="application/manifest+json",
                         headers={"Cache-Control": "no-cache"})
 
 
@@ -201,7 +271,17 @@ def archive_page():
 @app.get("/api/archive")
 def list_archive():
     total_bytes, entries = archive.list_entries()
-    return {"total_bytes": total_bytes, "entries": entries}
+    # The archive is on the bind-mounted volume, so these are the host
+    # drive's real figures. Nothing deletes reels automatically; showing how
+    # full the drive is, not just how big the archive is, is what keeps
+    # "the disk is filling up" a visible risk (004 FR-039, README).
+    try:
+        disk = shutil.disk_usage(archive.ARCHIVE_DIR)
+        disk_total, disk_free = disk.total, disk.free
+    except OSError:
+        disk_total = disk_free = None
+    return {"total_bytes": total_bytes, "entries": entries,
+            "disk_total_bytes": disk_total, "disk_free_bytes": disk_free}
 
 
 @app.get("/api/archive/{reel_id:path}/video")
@@ -239,6 +319,18 @@ def get_archive_screenshot(reel_id: str):
     if not os.path.exists(path):
         raise HTTPException(404, "No screenshot for this reel.")
     return FileResponse(path)
+
+
+# Declared after the /video, /thumb and /screenshot routes on purpose: with
+# the :path converter this pattern also matches "<id>/video", so declared
+# first it would swallow them. It must stay below them.
+@app.get("/api/archive/{reel_id:path}")
+def get_archive_entry(reel_id: str):
+    _require_valid_id(reel_id)
+    entry = archive.read_public_entry(reel_id)
+    if entry is None:
+        raise HTTPException(404, "Archived reel not found.")
+    return entry
 
 
 @app.delete("/api/archive/{reel_id:path}")

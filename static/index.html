@@ -2,144 +2,359 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FaceReel</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sessions · Supercut</title>
+<meta name="description" content="Every moment they appear, cut into one reel.">
+<!-- Theme, before the stylesheet and inline on purpose: it must set
+     data-theme before first paint or a forced theme flashes the other one
+     (004 research D2, FR-017). Identical copies in session.html and archive.html. -->
+<script>try{var t=localStorage.getItem("supercut.theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="/static/css/supercut.css">
+<link rel="icon" href="/static/brand/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/brand/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#F6F6FA" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0A0A10" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Supercut">
 <style>
-  :root {
-    --bg: #f6f7f9; --card: #ffffff; --text: #1a2130; --muted: #64748b;
-    --accent: #4f46e5; --accent-2: #6366f1; --border: #e2e8f0; --error: #dc2626;
+  /* page layout only; every colour, size and duration is a token */
+  .hero { padding: var(--s-7) 0 var(--s-6); }
+  .hero .display { margin-bottom: var(--s-4); }
+  .hero-sub { color: var(--muted); font-size: var(--fs-lg); max-width: 34em; line-height: 1.5; }
+  .hero-actions { margin-top: var(--s-3); display: flex; gap: var(--s-3); flex-wrap: wrap; align-items: center; }
+  .start { display: flex; gap: var(--s-2); margin-top: var(--s-6); }
+  .start-field { flex: 1; min-width: 0; }
+  .start .input-lg { box-shadow: var(--shadow-2); }
+  @media (max-width: 480px) { .start { flex-direction: column; } }
+  .session-thumbs { display: flex; flex: none; }
+  .session-thumbs .thumb { width: 72px; border-radius: var(--r-md); border: 2px solid var(--surface); }
+  .session-thumbs .thumb + .thumb { margin-left: -36px; }
+  @media (max-width: 480px) { .session-thumbs { display: none; } }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-3); margin-top: var(--s-7); }
+  .step { padding: var(--s-4); }
+  .step-num {
+    width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--gradient); color: var(--on-accent); font-size: var(--fs-xs); font-weight: var(--fw-bold);
+    margin-bottom: var(--s-3);
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f1420; --card: #1a2130; --text: #e8ecf4; --muted: #94a3b8;
-      --accent: #818cf8; --accent-2: #6366f1; --border: #2d3748; --error: #f87171;
-    }
+  .step h3 { font-size: var(--fs-sm); margin-bottom: var(--s-1); }
+  .step p { color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; }
+  @media (max-width: 640px) {
+    .hero { padding-top: var(--s-6); }
+    .hero .display { font-size: var(--fs-2xl); }
+    .hero-sub { font-size: var(--fs-md); }
+    .steps { grid-template-columns: 1fr; }
   }
-  * { box-sizing: border-box; margin: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg); color: var(--text); min-height: 100vh;
-    display: flex; justify-content: center; padding: 40px 16px;
+  .session-card { display: flex; gap: var(--s-4); align-items: center; }
+  .session-card + .session-card { margin-top: var(--s-3); }
+  .session-body { flex: 1; min-width: 0; }
+  .session-title { font-weight: var(--fw-semibold); }
+  .session-meta { margin-top: var(--s-2); }
+  .session-sub { color: var(--muted); font-size: var(--fs-xs); margin-top: var(--s-2); }
+  @media (max-width: 480px) {
+    .session-card { flex-direction: column; align-items: stretch; }
+    .session-card .btn { width: 100%; }
   }
-  main { width: 100%; max-width: 640px; }
-  h1 { font-size: 1.5rem; margin-bottom: 4px; }
-  h2 { font-size: 1.05rem; margin-bottom: 12px; }
-  .sub { color: var(--muted); margin-bottom: 24px; font-size: 0.95rem; }
-  .sub a { color: var(--accent); }
-  .card {
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: 12px; padding: 24px; margin-bottom: 20px;
-  }
-  .hidden { display: none; }
-  button {
-    width: 100%; padding: 12px; border: none; border-radius: 8px;
-    background: var(--accent); color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
-  }
-  button:hover:not(:disabled) { background: var(--accent-2); }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .hint { color: var(--muted); font-size: 0.85rem; margin-top: 10px; line-height: 1.45; }
-  .error { color: var(--error); font-size: 0.9rem; margin-top: 12px; }
-  .sessions { list-style: none; padding: 0; }
-  .sessions li {
-    display: flex; gap: 12px; align-items: center; padding: 12px 0;
-    border-top: 1px solid var(--border);
-  }
-  .sessions li:first-child { border-top: none; padding-top: 0; }
-  .s-body { flex: 1; min-width: 0; }
-  .s-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .s-meta { color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
-  .s-meta code { font-size: 0.8rem; }
-  a.join {
-    flex: none; color: #fff; background: var(--accent); text-decoration: none;
-    font-weight: 600; font-size: 0.9rem; padding: 8px 16px; border-radius: 8px;
-  }
-  a.join:hover { background: var(--accent-2); }
+  section + section { margin-top: var(--s-7); }
+  section[hidden] + section { margin-top: 0; }
+  .recent-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-3); }
+  @media (max-width: 560px) { .recent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .recent-grid .card-body { padding: var(--s-2) var(--s-3) var(--s-3); }
+  .recent-grid .card-title { font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .now-card { display: flex; gap: var(--s-4); align-items: flex-start; }
+  .now-thumb { width: 160px; flex: none; }
+  .now-thumb .thumb { border-radius: var(--r-md); }
+  .now-body { flex: 1; min-width: 0; }
+  .now-body .stage-track { margin-top: var(--s-4); }
+  @media (max-width: 560px) { .now-card { flex-direction: column; } .now-thumb { width: 100%; } }
 </style>
 </head>
-<body>
-<main>
-  <h1>FaceReel</h1>
-  <p class="sub">Paste YouTube links and a screenshot of someone's face — get one video of every
-    moment they appear. Queue up to 10 videos in a session; when its queue empties, they are joined
-    into one reel.</p>
-  <p class="sub"><a href="/archive">View archived reels &rarr;</a></p>
-
-  <div class="card hidden" id="running">
-    <h2>Running sessions</h2>
-    <ul class="sessions" id="sessions"></ul>
+<body data-page="sessions">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="app-header">
+  <div class="app-header-inner">
+    <a class="brand" href="/" aria-label="Supercut, all sessions">
+      <img src="/static/brand/mark.svg" alt="" width="28" height="28">
+      <span class="wordmark">Super<span class="cut">cut</span></span>
+    </a>
+    <nav class="app-nav" aria-label="Main">
+      <a href="/" aria-current="page"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-layers"/></svg><span>Sessions</span></a>
+      <a href="/archive"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-grid"/></svg><span>Archive</span></a>
+    </nav>
+    <div class="app-header-actions">
+      <button type="button" class="btn btn-quiet btn-icon" id="theme-btn" popovertarget="theme-menu"
+              aria-haspopup="menu" aria-label="Theme: System">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-monitor"/></svg>
+      </button>
+      <div class="menu" id="theme-menu" popover role="menu" aria-label="Theme">
+        <button type="button" class="menu-item" role="menuitemradio" data-theme-choice="light" aria-checked="false">
+          <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-sun"/></svg><span>Light</span>
+          <svg class="icon check" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg>
+        </button>
+        <button type="button" class="menu-item" role="menuitemradio" data-theme-choice="dark" aria-checked="false">
+          <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-moon"/></svg><span>Dark</span>
+          <svg class="icon check" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg>
+        </button>
+        <button type="button" class="menu-item" role="menuitemradio" data-theme-choice="system" aria-checked="true">
+          <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-monitor"/></svg><span>System</span>
+          <svg class="icon check" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg>
+        </button>
+      </div>
+    </div>
   </div>
+</header>
 
-  <div class="card">
-    <h2 id="create-heading">Start a session</h2>
-    <button type="button" id="create">Create session</button>
-    <p class="hint">A session starts processing its first video as soon as you add it. Add the next
-      ones while earlier videos are still running: the session finishes and joins its reels once
-      nothing is left in its queue.</p>
-    <p class="error hidden" id="error"></p>
-  </div>
+<main id="main" class="page page-home">
+  <section class="hero">
+    <h1 class="display">Every moment they appear.<br><span class="gradient-text">One reel.</span></h1>
+    <p class="hero-sub">Give Supercut YouTube links and a screenshot of someone's face. It finds
+      every moment they're on screen and cuts them into one video. Queue up to 10 videos in a
+      session; when its queue empties, they're joined into a single reel.</p>
+    <form class="start" id="start" novalidate>
+      <label class="visually-hidden" for="start-url">YouTube link</label>
+      <div class="input-wrap start-field">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-link"/></svg>
+        <input class="input input-lg" type="url" id="start-url" inputmode="url" autocomplete="off"
+               placeholder="Paste a YouTube link to start" autofocus>
+      </div>
+      <button type="submit" class="btn btn-primary btn-lg" id="start-go">
+        <span>Start</span>
+        <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-arrow-right"/></svg>
+      </button>
+    </form>
+    <p class="field-error" id="error" hidden role="alert"></p>
+    <div class="hero-actions">
+      <button type="button" class="btn btn-quiet" id="create">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-plus"/></svg>
+        <span>or start an empty session</span>
+      </button>
+    </div>
+  </section>
+
+  <section id="now" hidden aria-labelledby="now-title">
+    <h2 class="section-title" id="now-title">Now processing</h2>
+    <div class="card now-card">
+      <div class="now-thumb" id="now-thumb"></div>
+      <div class="now-body">
+        <div class="row" style="align-items:baseline">
+          <div class="spacer truncate session-title" id="now-label"></div>
+          <a class="btn btn-secondary btn-sm" id="now-link">Open session</a>
+        </div>
+        <div id="now-track"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="loading" aria-hidden="true">
+    <div class="skeleton skeleton-row"></div>
+    <div class="skeleton skeleton-row"></div>
+    <div class="skeleton skeleton-row"></div>
+  </section>
+
+  <section id="running" hidden aria-labelledby="running-title">
+    <h2 class="section-title" id="running-title">Running sessions</h2>
+    <div id="sessions"></div>
+  </section>
+
+  <section id="recent" hidden aria-labelledby="recent-title">
+    <div class="row" style="margin-bottom:var(--s-3)">
+      <h2 class="section-title spacer" id="recent-title" style="margin:0">Recent reels</h2>
+      <a class="small" href="/archive">View all &rarr;</a>
+    </div>
+    <div class="recent-grid" id="recent-grid"></div>
+  </section>
+
+  <section id="how" hidden aria-labelledby="how-title">
+    <h2 class="section-title" id="how-title">How it works</h2>
+    <div class="steps">
+      <div class="card step">
+        <div class="step-num">1</div>
+        <h3>Paste a link</h3>
+        <p>Any YouTube video. Add up to 10 to one session; each waits its turn.</p>
+      </div>
+      <div class="card step">
+        <div class="step-num">2</div>
+        <h3>Show who</h3>
+        <p>A screenshot with a clear view of their face. It carries over to the next video.</p>
+      </div>
+      <div class="card step">
+        <div class="step-num">3</div>
+        <h3>Get one reel</h3>
+        <p>Every appearance, cut and joined. It's kept in the archive until you delete it.</p>
+      </div>
+    </div>
+  </section>
 </main>
+
+<script src="/static/js/shell.js"></script>
 <script src="/static/progress.js"></script>
 <script>
 const $ = id => document.getElementById(id);
+const { el, badge, icon } = Supercut;
 
-function el(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined) e.textContent = text;
-  return e;
+const COUNT_LABELS = { processing: "processing", waiting: "waiting", done: "done", failed: "failed" };
+
+function showError(msg) {
+  $("error").textContent = msg;
+  $("error").hidden = false;
 }
-function fmtDate(iso) {
-  return new Date(iso).toLocaleString(undefined, {
-    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-  });
+
+async function createSession() {
+  const res = await fetch("/api/sessions", { method: "POST" });
+  if (!res.ok) throw new Error("Couldn't create a session.");
+  return (await res.json()).id;
 }
-function countsLine(s) {
-  const c = s.counts, parts = [];
-  if (s.state === "joining") parts.push("joining reels");
-  for (const k of ["processing", "waiting", "done", "failed"]) if (c[k]) parts.push(`${c[k]} ${k}`);
-  return parts.join(" · ") || "no videos yet";
-}
+
+// FR-021: paste a link, Start, and land in a new session with the link
+// already in its form (research D8). Only a light shape check here; the
+// session page recognises YouTube links and the server decides the rest.
+$("start").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("error").hidden = true;
+  const link = $("start-url").value.trim();
+  let shapeOk = false;
+  try { shapeOk = !!new URL(link); } catch { shapeOk = false; }
+  if (!shapeOk) {
+    showError(link ? "That doesn't look like a link. Paste the YouTube video's address." : "Paste a YouTube link to start.");
+    $("start-url").setAttribute("aria-invalid", "true");
+    $("start-url").focus();
+    return;
+  }
+  $("start-url").removeAttribute("aria-invalid");
+  $("start-go").disabled = true;
+  try {
+    location.href = `/session/${await createSession()}?url=${encodeURIComponent(link)}`;
+  } catch (err) {
+    showError(err.message);
+    $("start-go").disabled = false;
+  }
+});
+$("start-url").addEventListener("input", () => { $("error").hidden = true; $("start-url").removeAttribute("aria-invalid"); });
 
 $("create").addEventListener("click", async () => {
   $("create").disabled = true;
+  $("error").hidden = true;
   try {
-    const res = await fetch("/api/sessions", { method: "POST" });
-    if (!res.ok) throw new Error("Could not create a session.");
-    location.href = `/session/${(await res.json()).id}`;
+    location.href = `/session/${await createSession()}`;
   } catch (err) {
-    $("error").textContent = err.message;
-    $("error").classList.remove("hidden");
+    showError(err.message);
+    Supercut.toast(err.message, { kind: "error" });
     $("create").disabled = false;
   }
 });
 
-// FR-001: the running sessions, then the option to create one. With none
-// running, only the create card shows.
-function render(sessions) {
-  $("running").classList.toggle("hidden", sessions.length === 0);
-  $("create-heading").textContent = sessions.length ? "Or start a new session" : "Start a session";
-  const list = $("sessions");
-  list.innerHTML = "";
-  for (const s of sessions) {
-    const li = el("li");
-    const body = el("div", "s-body");
-    body.appendChild(el("div", "s-title", s.title || s.first_url || "No videos yet"));
-    const meta = el("div", "s-meta");
-    meta.appendChild(el("code", null, s.id));
-    meta.appendChild(document.createTextNode(` · started ${fmtDate(s.created_at)} · ${countsLine(s)}`));
-    body.appendChild(meta);
-    li.appendChild(body);
-    const join = el("a", "join", "Join");
-    join.href = `/session/${s.id}`;
-    li.appendChild(join);
-    list.appendChild(li);
+function sessionCard(s) {
+  const card = el("div", "card card-tight session-card");
+  if (s.video_urls && s.video_urls.length) {
+    const strip = el("div", "session-thumbs");
+    strip.setAttribute("aria-hidden", "true");
+    for (const u of s.video_urls) strip.appendChild(Supercut.thumbImg(u));
+    card.appendChild(strip);
   }
+  const body = el("div", "session-body");
+  const title = el("div", "session-title truncate", s.title || s.first_url || "No videos yet");
+  title.title = s.title || s.first_url || "";
+  body.appendChild(title);
+  const meta = el("div", "row-wrap session-meta");
+  if (s.state === "joining") meta.appendChild(badge("joining", "joining reels"));
+  for (const k of ["processing", "waiting", "done", "failed"]) {
+    if (s.counts[k]) meta.appendChild(badge(k, `${s.counts[k]} ${COUNT_LABELS[k]}`));
+  }
+  if (!meta.childNodes.length) meta.appendChild(badge("waiting", "no videos yet"));
+  body.appendChild(meta);
+  const sub = el("div", "session-sub");
+  sub.appendChild(document.createTextNode(`Started ${Supercut.fmtShortDate(s.created_at)} · `));
+  sub.appendChild(el("code", null, s.id));
+  body.appendChild(sub);
+  card.appendChild(body);
+  const join = el("a", "btn btn-secondary");
+  join.href = `/session/${s.id}`;
+  join.appendChild(el("span", null, "Join"));
+  join.appendChild(icon("arrow-right"));
+  card.appendChild(join);
+  return card;
 }
+
+// FR-001 (003): the running sessions, then the option to create one. With
+// none running, the hero is the empty state and "How it works" fills in.
+let firstRender = true;
+let lastRendered = null;
+function render(sessions) {
+  if (firstRender) { $("loading").remove(); firstRender = false; }
+  // most polls change nothing; skipping them keeps thumbnails from being
+  // re-inserted (and flickering) every two seconds
+  const sig = JSON.stringify(sessions);
+  if (sig === lastRendered) return;
+  lastRendered = sig;
+  $("running").hidden = sessions.length === 0;
+  $("how").hidden = sessions.length > 0;
+  const list = $("sessions");
+  list.replaceChildren(...sessions.map(sessionCard));
+}
+
+// FR-029 on the home page: what's running right now, fed by the shared
+// progress bar's own poll, so this adds no requests (FR-045).
+let lastSessions = [];
+let nowTrack = null, nowThumbFor = null;
+function renderNow(job) {
+  const show = !!job && job.status === "processing";
+  $("now").hidden = !show;
+  if (!show) return;
+  $("now-label").textContent = `Session ${job.session_id.slice(0, 6)}… · ` +
+    (job.kind === "join" ? "joining reels" : `video ${job.index} of ${job.total}`);
+  $("now-link").href = `/session/${job.session_id}`;
+  const args = job.kind === "join"
+    ? { stage: "stitch", progress: job.progress, elapsed_s: job.elapsed_s, message: job.message }
+    : { stage: job.stage, progress: job.progress, elapsed_s: job.elapsed_s, zoom: job.zoom,
+        network: job.stage === "network", message: job.message };
+  if (!nowTrack) { nowTrack = Supercut.stageTrack(args); $("now-track").appendChild(nowTrack); }
+  else nowTrack.update(args);
+  // the session list knows the URLs; match by session and position
+  const sess = lastSessions.find(x => x.id === job.session_id);
+  const url = sess && job.index ? (sess.video_urls || [])[job.index - 1] : null;
+  if (url !== nowThumbFor) { nowThumbFor = url; $("now-thumb").replaceChildren(Supercut.thumbImg(url)); }
+}
+SupercutProgress.subscribe(renderNow);
+
+// Recent reels: the six newest, fetched ONCE on load -- not polled, so the
+// home page's request rate is unchanged (FR-045). Hidden when the archive is
+// empty or the fetch fails; the page works the same without it.
+(async function loadRecent() {
+  let data;
+  try {
+    const res = await fetch("/api/archive");
+    if (!res.ok) return;
+    data = await res.json();
+  } catch { return; }
+  const recent = data.entries.slice().sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 6);
+  if (!recent.length) return;
+  $("recent-grid").replaceChildren(...recent.map(e => {
+    const a = el("a", "card card-media card-interactive");
+    a.href = `/archive#${e.id}`;
+    a.title = e.title || "";
+    const t = el("div", "thumb" + (e.has_thumb ? "" : " is-placeholder"));
+    if (e.has_thumb) {
+      const img = el("img");
+      Object.assign(img, { src: `/api/archive/${e.id}/thumb`, alt: "", loading: "lazy", decoding: "async" });
+      t.appendChild(img);
+    }
+    if (e.kind === "session") { const b = el("div", "thumb-badges"); b.appendChild(badge("session", "Session")); t.appendChild(b); }
+    t.appendChild(el("span", "thumb-chip", Supercut.fmtDuration(e.output_duration)));
+    a.appendChild(t);
+    const body = el("div", "card-body");
+    body.appendChild(el("div", "card-title", e.title || "(untitled)"));
+    a.appendChild(body);
+    return a;
+  }));
+  $("recent").hidden = false;
+})();
 
 async function poll() {
   try {
     const res = await fetch("/api/sessions");
-    if (res.ok) render((await res.json()).sessions);
+    if (res.ok) { lastSessions = (await res.json()).sessions; render(lastSessions); }
   } catch { /* transient; next tick retries */ }
 }
 // Every 2s while visible -- a chosen value, not a measured one (constitution

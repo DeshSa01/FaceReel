@@ -140,6 +140,10 @@ def archive_job(job_id, url, result, tuning, screenshot_path, session_id=None):
         }
         if session_id:
             sidecar["session_id"] = session_id
+        # absent when the pipeline couldn't vouch for it, and on every reel
+        # made before 004; readers treat absence as "no clip information"
+        if result.get("clips"):
+            sidecar["clips"] = result["clips"]
         with open(os.path.join(staging, SIDECAR_NAME), "w") as f:
             json.dump(sidecar, f, indent=2)
 
@@ -172,7 +176,10 @@ def archive_session(sid, joined_path, info):
             "created_at": datetime.now().astimezone().replace(microsecond=0).isoformat(),
             "url": None,
             "title": f"Session {sid} · {joined} video{'s' if joined != 1 else ''}",
-            "filename": f"facereel-session-{sid}.mp4",
+            # New session reels carry the new name; existing sidecars are
+            # deliberately not rewritten, because a sidecar is a record of what
+            # was made (004 research D17), so older reels keep their names.
+            "filename": f"supercut-session-{sid}.mp4",
             "video": "output.mp4",
             "thumb": "thumb.jpg" if thumb_ok else None,
             "screenshot": None,
@@ -184,6 +191,8 @@ def archive_session(sid, joined_path, info):
             "tuning": None,
             "videos": info["videos"],
         }
+        if info.get("clips"):
+            sidecar["clips"] = info["clips"]
         with open(os.path.join(staging, SIDECAR_NAME), "w") as f:
             json.dump(sidecar, f, indent=2)
         # A retried session replaces its earlier reel. A directory can't be
@@ -222,6 +231,39 @@ def recover_parked():
     return restored, removed
 
 
+def _public_entry(reel_id, path):
+    """One entry in the shape the listing and GET /api/archive/<id> return, or
+    None for a missing or unparseable sidecar. One function for both, so the
+    two shapes cannot drift (004 contracts/http.md)."""
+    entry = read_entry(reel_id)
+    if entry is None:
+        return None
+    thumb, screenshot, video = entry.get("thumb"), entry.get("screenshot"), entry.get("video")
+    if entry.get("videos"):
+        # sidecars keep the raw reason; the listing shows one sentence
+        entry["videos"] = [{**v, "reason": friendly_error(v.get("reason"))}
+                           for v in entry["videos"]]
+    return {
+        "kind": "video",
+        **{k: v for k, v in entry.items() if k not in ("video", "thumb", "screenshot")},
+        "size_bytes": _dir_size(path),
+        "has_thumb": bool(thumb) and os.path.exists(os.path.join(path, thumb)),
+        "has_screenshot": bool(screenshot) and os.path.exists(os.path.join(path, screenshot)),
+        "available": bool(video) and os.path.exists(os.path.join(path, video)),
+    }
+
+
+def read_public_entry(reel_id):
+    """GET /api/archive/<id>: one entry, listing-shaped, or None."""
+    try:
+        path = entry_dir(reel_id)
+    except ValueError:
+        return None
+    if not os.path.isdir(path):
+        return None
+    return _public_entry(reel_id, path)
+
+
 def list_entries():
     """Every valid entry, newest first, plus the archive's total measured
     size (FR-014, FR-016). Entries with a missing or unparseable sidecar are
@@ -232,24 +274,11 @@ def list_entries():
     for de in os.scandir(ARCHIVE_DIR):
         if not de.is_dir() or de.name.startswith("."):
             continue
-        entry = read_entry(de.name)
+        entry = _public_entry(de.name, de.path)
         if entry is None:
             continue
-        size = _dir_size(de.path)
-        total_bytes += size
-        thumb, screenshot, video = entry.get("thumb"), entry.get("screenshot"), entry.get("video")
-        if entry.get("videos"):
-            # sidecars keep the raw reason; the listing shows one sentence
-            entry["videos"] = [{**v, "reason": friendly_error(v.get("reason"))}
-                               for v in entry["videos"]]
-        entries.append({
-            "kind": "video",
-            **{k: v for k, v in entry.items() if k not in ("video", "thumb", "screenshot")},
-            "size_bytes": size,
-            "has_thumb": bool(thumb) and os.path.exists(os.path.join(de.path, thumb)),
-            "has_screenshot": bool(screenshot) and os.path.exists(os.path.join(de.path, screenshot)),
-            "available": bool(video) and os.path.exists(os.path.join(de.path, video)),
-        })
+        total_bytes += entry["size_bytes"]
+        entries.append(entry)
     entries.sort(key=lambda e: e.get("created_at", ""), reverse=True)
     return total_bytes, entries
 

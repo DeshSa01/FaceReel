@@ -11,3 +11,6 @@ storage/sessions/
 *.jpg
 *.png
 .claude/
+# ...except the committed brand icons (rendered by tools/render-icons.sh);
+# the *.png rule above exists for posters and screenshots, not these
+!static/brand/*.png

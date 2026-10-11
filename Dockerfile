@@ -37,7 +37,7 @@ COPY models/ models/
 COPY static/ static/
 # Every module is listed by name -- a new one missing here builds a clean
 # image that dies on import (the 9ee1688 fix, for archive.py).
-COPY app.py pipeline.py archive.py sessions.py runner.py ./
+COPY app.py pipeline.py archive.py sessions.py runner.py youtube.py ./
 
 # uid 1000 matches the usual first non-root user on the host, so the
 # bind-mounted storage/ stays writable without a fight.
